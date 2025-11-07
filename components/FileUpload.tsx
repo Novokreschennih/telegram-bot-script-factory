@@ -4,13 +4,14 @@ import { UploadIcon } from './icons/UploadIcon';
 interface FileUploadProps {
   onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   fileName: string | null;
+  label: string;
 }
 
-const FileUpload: React.FC<FileUploadProps> = ({ onFileChange, fileName }) => {
+const FileUpload: React.FC<FileUploadProps> = ({ onFileChange, fileName, label }) => {
   return (
     <div>
       <label htmlFor="file-upload" className="block text-sm font-medium text-gray-300 mb-2">
-        Загрузите референсный сценарий
+        {label}
       </label>
       <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-600 border-dashed rounded-md hover:border-purple-400 transition-colors">
         <div className="space-y-1 text-center">

@@ -1,11 +1,11 @@
 export const WRITING_STYLES = [
-  { value: 'Calm and Reassuring', label: 'Спокойный и убедительный' },
-  { value: 'Sales-oriented and Persuasive', label: 'Продающий' },
-  { value: 'Aggressive and Urgent', label: 'Агрессивный' },
-  { value: 'Assertive and Confident', label: 'Напористый' },
-  { value: 'Friendly and Casual', label: 'Дружелюбный и неформальный' },
-  { value: 'Formal and Professional', label: 'Формальный и профессиональный' },
-  { value: 'Humorous and Witty', label: 'Юмористический и остроумный' },
+  { value: 'Helpful and Professional', label: 'Полезный и профессиональный' },
+  { value: 'Friendly and Conversational', label: 'Дружелюбный и разговорный' },
+  { value: 'Empathetic and Reassuring', label: 'Эмпатичный и поддерживающий' },
+  { value: 'Persuasive and Sales-oriented', label: 'Убедительный и продающий' },
+  { value: 'Playful and Humorous', label: 'Игривый и с юмором' },
+  { value: 'Direct and Action-oriented', label: 'Прямой и ориентированный на действие' },
+  { value: 'Elegant and Refined', label: 'Элегантный и изысканный' },
 ];
 
 export const TARGET_AUDIENCES = [
@@ -42,6 +42,7 @@ export const EMOJI_FREQUENCIES = [
 ];
 
 export const RESPONSE_LENGTHS = [
+    { value: 'As in original', label: 'Как в оригинале' },
     { value: 'Medium (Balanced)', label: 'Средняя' },
     { value: 'Short and Concise', label: 'Короткая и лаконичная' },
     { value: 'Detailed and Explanatory', label: 'Подробная и объясняющая' },

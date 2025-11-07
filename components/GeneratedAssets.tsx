@@ -1,15 +1,68 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { GeneratedAssets } from '../types';
+import { CopyIcon } from './icons/CopyIcon';
+import { CheckIcon } from './icons/CheckIcon';
+import { DownloadIcon } from './icons/DownloadIcon';
 
 interface GeneratedAssetsProps {
   assets: GeneratedAssets;
   outputFormat: string;
 }
 
+const PromptCard: React.FC<{ title: string; prompt: string; className?: string }> = ({ title, prompt, className = '' }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(prompt);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className={`bg-gray-900/50 rounded-lg overflow-hidden group p-4 flex flex-col ${className}`}>
+        <h4 className="text-sm md:text-base font-semibold text-gray-200 mb-2">{title}</h4>
+        <p className="text-sm text-gray-400 font-mono flex-grow mb-4">{prompt}</p>
+        <button
+            onClick={handleCopy}
+            className="mt-auto w-full flex items-center justify-center gap-2 bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+        >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+            {copied ? 'Скопировано!' : 'Копировать промпт'}
+        </button>
+    </div>
+  );
+};
+
 const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets, outputFormat }) => {
+  const [scriptCopied, setScriptCopied] = useState(false);
+
   const copyToClipboard = () => {
     navigator.clipboard.writeText(assets.customizedScript);
-    alert('Сценарий скопирован в буфер обмена!');
+    setScriptCopied(true);
+    setTimeout(() => setScriptCopied(false), 2000);
+  };
+  
+  const handleDownload = () => {
+    let mimeType = 'text/plain;charset=utf-8';
+    let extension = 'txt';
+
+    if (outputFormat === 'Markdown') {
+        mimeType = 'text/markdown;charset=utf-8';
+        extension = 'md';
+    } else if (outputFormat.toLowerCase().includes('json')) {
+        mimeType = 'application/json;charset=utf-8';
+        extension = 'json';
+    }
+
+    const blob = new Blob([assets.customizedScript], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `customized_script.${extension}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const isJsonFormat = useMemo(() => outputFormat.toLowerCase().includes('json'), [outputFormat]);
@@ -17,10 +70,8 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets, outp
   const displayScript = useMemo(() => {
     if (isJsonFormat && assets.customizedScript) {
         try {
-            // The script is a string containing JSON, so we parse it for pretty printing
             return JSON.stringify(JSON.parse(assets.customizedScript), null, 2);
         } catch (e) {
-            // If it fails to parse, show the raw string, maybe it's an error message
             console.error("Failed to parse script as JSON", e);
             return assets.customizedScript; 
         }
@@ -36,15 +87,8 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets, outp
         <h2 className="text-3xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500">
           Профиль бота
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-center">
-          <div className="flex justify-center md:col-span-1">
-            <img 
-              src={assets.profilePictureUrl} 
-              alt="Сгенерированный профиль бота"
-              className="w-48 h-48 rounded-full object-cover shadow-lg shadow-purple-500/30 border-4 border-gray-700" 
-            />
-          </div>
-          <div className="md:col-span-2 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-8">
+          <div className="md:col-span-3 space-y-4">
             <div>
               <h3 className="text-lg font-semibold text-gray-300 uppercase tracking-wider">Описание</h3>
               <p className="text-gray-300 mt-1">{assets.description}</p>
@@ -58,21 +102,37 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets, outp
               </ul>
             </div>
           </div>
+          <div className="md:col-span-2">
+            <PromptCard 
+              title="Промпт для изображения профиля"
+              prompt={assets.profilePicturePrompt}
+            />
+          </div>
         </div>
       </section>
 
       {/* Customized Script Section */}
       <section className="bg-gray-800/50 rounded-2xl p-6 md:p-8">
-        <div className="flex justify-between items-center mb-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
             <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">
             Адаптированный сценарий
             </h2>
-            <button
-                onClick={copyToClipboard}
-                className="bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-            >
-                Копировать сценарий
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                  onClick={handleDownload}
+                  className="flex items-center gap-2 bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                  <DownloadIcon />
+                  Скачать файл
+              </button>
+              <button
+                  onClick={copyToClipboard}
+                  className="flex items-center gap-2 bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                  {scriptCopied ? <CheckIcon /> : <CopyIcon />}
+                  {scriptCopied ? 'Скопировано' : 'Копировать'}
+              </button>
+            </div>
         </div>
         <pre className="bg-gray-900/70 rounded-lg p-4 text-sm text-gray-300 overflow-x-auto max-h-[600px] whitespace-pre-wrap font-mono">
           <code>{displayScript}</code>
@@ -82,20 +142,15 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets, outp
       {/* Script Visuals Section */}
       <section className="bg-gray-800/50 rounded-2xl p-6 md:p-8">
         <h2 className="text-3xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
-          Визуализация сценария
+          Промпты для визуализации сценария
         </h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
-          {assets.scriptBlockImages.map((image, index) => (
-            <div key={index} className="bg-gray-900/50 rounded-lg overflow-hidden group">
-              <img 
-                src={image.imageUrl} 
-                alt={image.blockTitle} 
-                className="w-full h-32 md:h-40 object-cover group-hover:scale-105 transition-transform duration-300" 
-              />
-              <div className="p-3">
-                <h4 className="text-sm md:text-base font-semibold text-gray-200 truncate">{image.blockTitle}</h4>
-              </div>
-            </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+          {assets.scriptBlockPrompts.map((prompt, index) => (
+            <PromptCard 
+              key={index} 
+              title={prompt.blockTitle}
+              prompt={prompt.imagePrompt}
+            />
           ))}
         </div>
       </section>

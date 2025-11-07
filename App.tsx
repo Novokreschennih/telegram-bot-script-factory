@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { generateBotAssets } from './services/geminiService';
 import type { GeneratedAssets } from './types';
 import { WRITING_STYLES, TARGET_AUDIENCES, BOT_GOALS, FORMALITY_LEVELS, EMOJI_FREQUENCIES, RESPONSE_LENGTHS, LANGUAGE_COMPLEXITIES, OUTPUT_FORMATS } from './constants';
@@ -11,8 +11,6 @@ import ApiKeySelector from './components/ApiKeySelector';
 import { MagicIcon } from './components/icons/MagicIcon';
 
 declare global {
-  // Fix: Moved the AIStudio interface into the global scope to resolve a TypeScript error
-  // where subsequent property declarations of `window.aistudio` were considered to have different types.
   interface AIStudio {
     hasSelectedApiKey: () => Promise<boolean>;
     openSelectKey: () => Promise<void>;
@@ -26,8 +24,10 @@ declare global {
 const APP_STATE_STORAGE_KEY = 'botCustomizerState';
 const API_KEY_SELECTED_FLAG = 'apiKeySelected';
 
+type AppMode = 'customize' | 'create';
+
 interface AppState {
-    referenceScript: string;
+    mainInputText: string;
     fileName: string;
     userStory: string;
     writingStyle: string;
@@ -38,13 +38,14 @@ interface AppState {
     responseLength: string;
     languageComplexity: string;
     outputFormat: string;
+    mode: AppMode;
 }
 
 const App: React.FC = () => {
   const [isApiKeySelected, setIsApiKeySelected] = useState<boolean>(false);
   
-  // Initialize state from localStorage or use defaults
-  const [referenceScript, setReferenceScript] = useState<string>('');
+  const [mode, setMode] = useState<AppMode>('customize');
+  const [mainInputText, setMainInputText] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
   const [userStory, setUserStory] = useState<string>('');
   const [writingStyle, setWritingStyle] = useState<string>(WRITING_STYLES[0].value);
@@ -67,7 +68,7 @@ const App: React.FC = () => {
       const savedStateJSON = localStorage.getItem(APP_STATE_STORAGE_KEY);
       if (savedStateJSON) {
         const savedState: AppState = JSON.parse(savedStateJSON);
-        setReferenceScript(savedState.referenceScript || '');
+        setMainInputText(savedState.mainInputText || '');
         setFileName(savedState.fileName || '');
         setUserStory(savedState.userStory || '');
         setWritingStyle(savedState.writingStyle || WRITING_STYLES[0].value);
@@ -78,6 +79,7 @@ const App: React.FC = () => {
         setResponseLength(savedState.responseLength || RESPONSE_LENGTHS[0].value);
         setLanguageComplexity(savedState.languageComplexity || LANGUAGE_COMPLEXITIES[0].value);
         setOutputFormat(savedState.outputFormat || OUTPUT_FORMATS[0].value);
+        setMode(savedState.mode || 'customize');
       }
     } catch (e) {
       console.error("Failed to parse state from localStorage", e);
@@ -87,7 +89,7 @@ const App: React.FC = () => {
   // Save state to localStorage whenever it changes
   useEffect(() => {
     const appState: AppState = {
-      referenceScript,
+      mainInputText,
       fileName,
       userStory,
       writingStyle,
@@ -98,22 +100,21 @@ const App: React.FC = () => {
       responseLength,
       languageComplexity,
       outputFormat,
+      mode,
     };
     localStorage.setItem(APP_STATE_STORAGE_KEY, JSON.stringify(appState));
   }, [
-    referenceScript, fileName, userStory, writingStyle, targetAudience,
-    botGoal, formality, emojiFrequency, responseLength, languageComplexity, outputFormat
+    mainInputText, fileName, userStory, writingStyle, targetAudience,
+    botGoal, formality, emojiFrequency, responseLength, languageComplexity, outputFormat, mode
   ]);
 
 
   useEffect(() => {
     const checkApiKey = async () => {
-      // Optimistically set the state based on localStorage to avoid UI flicker
       if (localStorage.getItem(API_KEY_SELECTED_FLAG)) {
         setIsApiKeySelected(true);
       }
       
-      // Then, verify with the actual source of truth
       if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
         const hasKey = await window.aistudio.hasSelectedApiKey();
         setIsApiKeySelected(hasKey);
@@ -133,6 +134,35 @@ const App: React.FC = () => {
       localStorage.setItem(API_KEY_SELECTED_FLAG, 'true');
     }
   };
+  
+  const processFileContent = (file: File, text: string) => {
+    setFileName(file.name);
+    if (mode === 'customize' && file.name.endsWith('.json')) {
+      try {
+        const parsedJson = JSON.parse(text);
+        if (parsedJson.nodes && Array.isArray(parsedJson.nodes)) {
+          const scriptText = parsedJson.nodes
+            .map((node: any) => node?.parameters?.text)
+            .filter(Boolean)
+            .join('\n\n---\n\n');
+          if (scriptText) {
+            setMainInputText(scriptText);
+          } else {
+             setMainInputText('Не удалось извлечь текст из n8n JSON. Используется содержимое файла как текст.');
+             setError('Не удалось найти текстовые узлы в файле n8n. Сценарий будет обработан как обычный текст.');
+          }
+        } else {
+          setMainInputText(JSON.stringify(parsedJson, null, 2));
+        }
+      } catch (error) {
+        console.error("Failed to parse JSON file, treating as text.", error);
+        setMainInputText(text);
+        setError('Не удалось прочитать JSON файл. Он будет обработан как обычный текст.');
+      }
+    } else {
+      setMainInputText(text);
+    }
+  };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -140,32 +170,11 @@ const App: React.FC = () => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = e.target?.result as string;
-        setFileName(file.name);
-
-        if (file.name.endsWith('.json')) {
-          try {
-            const parsedJson = JSON.parse(text);
-            if (parsedJson.nodes && Array.isArray(parsedJson.nodes)) {
-              const scriptText = parsedJson.nodes
-                .map((node: any) => node?.parameters?.text)
-                .filter(Boolean)
-                .join('\n\n---\n\n');
-              if (scriptText) {
-                setReferenceScript(scriptText);
-              } else {
-                 setReferenceScript('Не удалось извлечь текст из n8n JSON. Используется содержимое файла как текст.');
-                 setError('Не удалось найти текстовые узлы в файле n8n. Сценарий будет обработан как обычный текст.');
-              }
-            } else {
-              setReferenceScript(JSON.stringify(parsedJson, null, 2));
-            }
-          } catch (error) {
-            console.error("Failed to parse JSON file, treating as text.", error);
-            setReferenceScript(text);
-            setError('Не удалось прочитать JSON файл. Он будет обработан как обычный текст.');
-          }
+        if(mode === 'customize') {
+          processFileContent(file, text);
         } else {
-          setReferenceScript(text);
+          setMainInputText(prev => prev ? `${prev}\n\n--- (содержимое файла ${file.name}) ---\n\n${text}` : text);
+          setFileName(prev => prev ? `${prev}, ${file.name}`: file.name);
         }
       };
       reader.readAsText(file);
@@ -173,18 +182,19 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = useCallback(async () => {
-    if (!referenceScript) {
-      setError('Пожалуйста, сначала загрузите референсный сценарий.');
+    if (!mainInputText) {
+      setError(mode === 'customize' ? 'Пожалуйста, сначала загрузите референсный сценарий.' : 'Пожалуйста, опишите идею вашего бота.');
       return;
     }
     setIsLoading(true);
     setError(null);
     setGeneratedAssets(null);
+    setLoadingMessage('Создание персонажа, сценария и промптов для изображений...');
 
     try {
-      setLoadingMessage('Создание персонажа и сценария для бота...');
       const assets = await generateBotAssets(
-        referenceScript,
+        mode,
+        mainInputText,
         userStory,
         writingStyle,
         targetAudience,
@@ -193,8 +203,7 @@ const App: React.FC = () => {
         emojiFrequency,
         responseLength,
         languageComplexity,
-        outputFormat,
-        (message: string) => setLoadingMessage(message)
+        outputFormat
       );
       setGeneratedAssets(assets);
     } catch (err) {
@@ -214,7 +223,22 @@ const App: React.FC = () => {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [referenceScript, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, outputFormat]);
+  }, [mode, mainInputText, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, outputFormat]);
+
+  const availableResponseLengths = useMemo(() => {
+    if (mode === 'customize') {
+      return RESPONSE_LENGTHS;
+    }
+    return RESPONSE_LENGTHS.filter(opt => opt.value !== 'As in original');
+  }, [mode]);
+
+  useEffect(() => {
+    if (mode === 'create' && responseLength === 'As in original') {
+      setResponseLength(RESPONSE_LENGTHS.find(opt => opt.value === 'Medium (Balanced)')?.value || RESPONSE_LENGTHS[1].value);
+    } else if (mode === 'customize') {
+      setResponseLength('As in original');
+    }
+  }, [mode]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans">
@@ -223,8 +247,8 @@ const App: React.FC = () => {
           <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
             Кастомизатор сценариев для Telegram-бота
           </h1>
-          <p className="mt-4 text-lg text-gray-400 max-w-2xl mx-auto">
-            Загрузите сценарий вашего бота, добавьте свою историю, и ИИ сгенерирует полный пакет брендинга и контента.
+          <p className="mt-4 text-lg text-gray-400 max-w-3xl mx-auto">
+             Адаптируйте существующий сценарий или создайте новый с нуля. Загрузите текст, добавьте детали, и ИИ сгенерирует полный пакет брендинга и контента.
           </p>
         </header>
 
@@ -235,18 +259,50 @@ const App: React.FC = () => {
         ) : (
           <>
             <div className="max-w-4xl mx-auto bg-gray-800/50 rounded-2xl shadow-2xl shadow-purple-500/10 p-6 md:p-8 space-y-8">
+              
+              <div className="flex justify-center border-b border-gray-700">
+                <button 
+                  onClick={() => setMode('customize')}
+                  className={`px-6 py-3 text-lg font-medium transition-colors duration-300 ${mode === 'customize' ? 'border-b-2 border-purple-400 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                >
+                  Кастомизация
+                </button>
+                <button 
+                  onClick={() => setMode('create')}
+                  className={`px-6 py-3 text-lg font-medium transition-colors duration-300 ${mode === 'create' ? 'border-b-2 border-purple-400 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                >
+                  Создание с нуля
+                </button>
+              </div>
+
               {/* Inputs Section */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-6">
-                   <FileUpload onFileChange={handleFileChange} fileName={fileName} />
-                   <TextAreaInput
-                    id="user-story"
-                    label="Добавьте вашу историю (необязательно)"
-                    placeholder="Например, наша компания продает экологически чистые кофейные зерна из небольших ферм в Колумбии..."
-                    value={userStory}
-                    onChange={(e) => setUserStory(e.target.value)}
-                    rows={5}
-                  />
+                   {mode === 'customize' ? (
+                     <>
+                       <FileUpload onFileChange={handleFileChange} fileName={fileName} label="Загрузите референсный сценарий" />
+                       <TextAreaInput
+                        id="user-story"
+                        label="Добавьте вашу историю (необязательно)"
+                        placeholder="Например, наша компания продает экологически чистые кофейные зерна..."
+                        value={userStory}
+                        onChange={(e) => setUserStory(e.target.value)}
+                        rows={5}
+                      />
+                     </>
+                   ) : (
+                     <>
+                       <TextAreaInput
+                        id="bot-idea"
+                        label="Опишите идею вашего бота"
+                        placeholder="Например: бот для кофейни, который принимает заказы, рассказывает о сортах кофе и проводит викторины..."
+                        value={mainInputText}
+                        onChange={(e) => setMainInputText(e.target.value)}
+                        rows={8}
+                      />
+                       <FileUpload onFileChange={handleFileChange} fileName={fileName} label="Загрузите доп. материалы (необязательно)" />
+                     </>
+                   )}
                 </div>
                 <div className="space-y-4">
                     <h3 className="text-xl font-semibold text-white mb-4">Настройте голос вашего бота</h3>
@@ -291,7 +347,7 @@ const App: React.FC = () => {
                             label="Длина ответов"
                             value={responseLength}
                             onChange={(e) => setResponseLength(e.target.value)}
-                            options={RESPONSE_LENGTHS}
+                            options={availableResponseLengths}
                         />
                          <SelectInput 
                             id="language-complexity"
@@ -315,7 +371,7 @@ const App: React.FC = () => {
               <div className="pt-4 border-t border-gray-700">
                  <button
                   onClick={handleGenerate}
-                  disabled={isLoading || !referenceScript}
+                  disabled={isLoading || !mainInputText}
                   className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-purple-500/50 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
                 >
                   {isLoading ? (

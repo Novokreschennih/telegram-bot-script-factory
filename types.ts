@@ -1,18 +1,19 @@
 
-export interface ScriptBlockImage {
+export interface ScriptBlockPrompt {
   blockTitle: string;
-  imageUrl: string;
+  imagePrompt: string;
 }
 
 export interface GeneratedAssets {
-  profilePictureUrl: string;
+  profilePicturePrompt: string;
   description: string;
   capabilities: string;
   customizedScript: string;
-  scriptBlockImages: ScriptBlockImage[];
+  scriptBlockPrompts: ScriptBlockPrompt[];
 }
 
 export interface TextGenerationResponse {
+    profilePicturePrompt: string;
     description: string;
     capabilities: string[];
     customizedScript: string;
