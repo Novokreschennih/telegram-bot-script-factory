@@ -52,3 +52,10 @@ export const LANGUAGE_COMPLEXITIES = [
     { value: 'Simple (Grade 5)', label: 'Простая (легко читаемая)' },
     { value: 'Advanced (University level)', label: 'Продвинутая (сложная лексика)' },
 ];
+
+export const OUTPUT_FORMATS = [
+  { value: 'Markdown', label: 'Markdown (.md)' },
+  { value: 'n8n JSON', label: 'n8n JSON' },
+  { value: 'JSON', label: 'JSON' },
+  { value: 'Text', label: 'Обычный текст (.txt)' },
+];

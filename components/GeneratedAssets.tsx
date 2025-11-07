@@ -1,15 +1,33 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { GeneratedAssets } from '../types';
 
 interface GeneratedAssetsProps {
   assets: GeneratedAssets;
+  outputFormat: string;
 }
 
-const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) => {
+const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets, outputFormat }) => {
   const copyToClipboard = () => {
     navigator.clipboard.writeText(assets.customizedScript);
     alert('Сценарий скопирован в буфер обмена!');
   };
+
+  const isJsonFormat = useMemo(() => outputFormat.toLowerCase().includes('json'), [outputFormat]);
+
+  const displayScript = useMemo(() => {
+    if (isJsonFormat && assets.customizedScript) {
+        try {
+            // The script is a string containing JSON, so we parse it for pretty printing
+            return JSON.stringify(JSON.parse(assets.customizedScript), null, 2);
+        } catch (e) {
+            // If it fails to parse, show the raw string, maybe it's an error message
+            console.error("Failed to parse script as JSON", e);
+            return assets.customizedScript; 
+        }
+    }
+    return assets.customizedScript;
+  }, [assets.customizedScript, isJsonFormat]);
+
 
   return (
     <div className="space-y-12">
@@ -56,8 +74,8 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) =>
                 Копировать сценарий
             </button>
         </div>
-        <pre className="bg-gray-900/70 rounded-lg p-4 text-sm text-gray-300 overflow-x-auto max-h-96 whitespace-pre-wrap font-mono">
-          <code>{assets.customizedScript}</code>
+        <pre className="bg-gray-900/70 rounded-lg p-4 text-sm text-gray-300 overflow-x-auto max-h-[600px] whitespace-pre-wrap font-mono">
+          <code>{displayScript}</code>
         </pre>
       </section>
 

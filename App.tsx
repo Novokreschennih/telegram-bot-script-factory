@@ -1,15 +1,49 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { generateBotAssets } from './services/geminiService';
-import type { GeneratedAssets, ScriptBlockImage } from './types';
-import { WRITING_STYLES, TARGET_AUDIENCES, BOT_GOALS, FORMALITY_LEVELS, EMOJI_FREQUENCIES, RESPONSE_LENGTHS, LANGUAGE_COMPLEXITIES } from './constants';
+import type { GeneratedAssets } from './types';
+import { WRITING_STYLES, TARGET_AUDIENCES, BOT_GOALS, FORMALITY_LEVELS, EMOJI_FREQUENCIES, RESPONSE_LENGTHS, LANGUAGE_COMPLEXITIES, OUTPUT_FORMATS } from './constants';
 import FileUpload from './components/FileUpload';
 import TextAreaInput from './components/TextAreaInput';
 import SelectInput from './components/SelectInput';
 import GeneratedAssetsComponent from './components/GeneratedAssets';
 import LoadingSpinner from './components/LoadingSpinner';
+import ApiKeySelector from './components/ApiKeySelector';
 import { MagicIcon } from './components/icons/MagicIcon';
 
+declare global {
+  // Fix: Moved the AIStudio interface into the global scope to resolve a TypeScript error
+  // where subsequent property declarations of `window.aistudio` were considered to have different types.
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+
+  interface Window {
+    aistudio?: AIStudio;
+  }
+}
+
+const APP_STATE_STORAGE_KEY = 'botCustomizerState';
+const API_KEY_SELECTED_FLAG = 'apiKeySelected';
+
+interface AppState {
+    referenceScript: string;
+    fileName: string;
+    userStory: string;
+    writingStyle: string;
+    targetAudience: string;
+    botGoal: string;
+    formality: string;
+    emojiFrequency: string;
+    responseLength: string;
+    languageComplexity: string;
+    outputFormat: string;
+}
+
 const App: React.FC = () => {
+  const [isApiKeySelected, setIsApiKeySelected] = useState<boolean>(false);
+  
+  // Initialize state from localStorage or use defaults
   const [referenceScript, setReferenceScript] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
   const [userStory, setUserStory] = useState<string>('');
@@ -20,11 +54,85 @@ const App: React.FC = () => {
   const [emojiFrequency, setEmojiFrequency] = useState<string>(EMOJI_FREQUENCIES[0].value);
   const [responseLength, setResponseLength] = useState<string>(RESPONSE_LENGTHS[0].value);
   const [languageComplexity, setLanguageComplexity] = useState<string>(LANGUAGE_COMPLEXITIES[0].value);
+  const [outputFormat, setOutputFormat] = useState<string>(OUTPUT_FORMATS[0].value);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [generatedAssets, setGeneratedAssets] = useState<GeneratedAssets | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Load state from localStorage on initial render
+  useEffect(() => {
+    try {
+      const savedStateJSON = localStorage.getItem(APP_STATE_STORAGE_KEY);
+      if (savedStateJSON) {
+        const savedState: AppState = JSON.parse(savedStateJSON);
+        setReferenceScript(savedState.referenceScript || '');
+        setFileName(savedState.fileName || '');
+        setUserStory(savedState.userStory || '');
+        setWritingStyle(savedState.writingStyle || WRITING_STYLES[0].value);
+        setTargetAudience(savedState.targetAudience || TARGET_AUDIENCES[0].value);
+        setBotGoal(savedState.botGoal || BOT_GOALS[0].value);
+        setFormality(savedState.formality || FORMALITY_LEVELS[0].value);
+        setEmojiFrequency(savedState.emojiFrequency || EMOJI_FREQUENCIES[0].value);
+        setResponseLength(savedState.responseLength || RESPONSE_LENGTHS[0].value);
+        setLanguageComplexity(savedState.languageComplexity || LANGUAGE_COMPLEXITIES[0].value);
+        setOutputFormat(savedState.outputFormat || OUTPUT_FORMATS[0].value);
+      }
+    } catch (e) {
+      console.error("Failed to parse state from localStorage", e);
+    }
+  }, []);
+
+  // Save state to localStorage whenever it changes
+  useEffect(() => {
+    const appState: AppState = {
+      referenceScript,
+      fileName,
+      userStory,
+      writingStyle,
+      targetAudience,
+      botGoal,
+      formality,
+      emojiFrequency,
+      responseLength,
+      languageComplexity,
+      outputFormat,
+    };
+    localStorage.setItem(APP_STATE_STORAGE_KEY, JSON.stringify(appState));
+  }, [
+    referenceScript, fileName, userStory, writingStyle, targetAudience,
+    botGoal, formality, emojiFrequency, responseLength, languageComplexity, outputFormat
+  ]);
+
+
+  useEffect(() => {
+    const checkApiKey = async () => {
+      // Optimistically set the state based on localStorage to avoid UI flicker
+      if (localStorage.getItem(API_KEY_SELECTED_FLAG)) {
+        setIsApiKeySelected(true);
+      }
+      
+      // Then, verify with the actual source of truth
+      if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        setIsApiKeySelected(hasKey);
+        if (!hasKey) {
+          localStorage.removeItem(API_KEY_SELECTED_FLAG);
+        }
+      }
+    };
+    const timeoutId = setTimeout(checkApiKey, 100);
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  const handleSelectKey = async () => {
+    if (window.aistudio?.openSelectKey) {
+      await window.aistudio.openSelectKey();
+      setIsApiKeySelected(true);
+      localStorage.setItem(API_KEY_SELECTED_FLAG, 'true');
+    }
+  };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -32,8 +140,33 @@ const App: React.FC = () => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = e.target?.result as string;
-        setReferenceScript(text);
         setFileName(file.name);
+
+        if (file.name.endsWith('.json')) {
+          try {
+            const parsedJson = JSON.parse(text);
+            if (parsedJson.nodes && Array.isArray(parsedJson.nodes)) {
+              const scriptText = parsedJson.nodes
+                .map((node: any) => node?.parameters?.text)
+                .filter(Boolean)
+                .join('\n\n---\n\n');
+              if (scriptText) {
+                setReferenceScript(scriptText);
+              } else {
+                 setReferenceScript('Не удалось извлечь текст из n8n JSON. Используется содержимое файла как текст.');
+                 setError('Не удалось найти текстовые узлы в файле n8n. Сценарий будет обработан как обычный текст.');
+              }
+            } else {
+              setReferenceScript(JSON.stringify(parsedJson, null, 2));
+            }
+          } catch (error) {
+            console.error("Failed to parse JSON file, treating as text.", error);
+            setReferenceScript(text);
+            setError('Не удалось прочитать JSON файл. Он будет обработан как обычный текст.');
+          }
+        } else {
+          setReferenceScript(text);
+        }
       };
       reader.readAsText(file);
     }
@@ -60,17 +193,28 @@ const App: React.FC = () => {
         emojiFrequency,
         responseLength,
         languageComplexity,
+        outputFormat,
         (message: string) => setLoadingMessage(message)
       );
       setGeneratedAssets(assets);
     } catch (err) {
       console.error(err);
-      setError(err instanceof Error ? err.message : 'Произошла неизвестная ошибка.');
+      let errorMessage = 'Произошла неизвестная ошибка.';
+       if (err instanceof Error) {
+        if (err.message.includes('Requested entity was not found.')) {
+            errorMessage = 'Ваш API-ключ недействителен или не имеет доступа к необходимым моделям. Пожалуйста, выберите другой ключ и попробуйте снова.';
+            setIsApiKeySelected(false);
+            localStorage.removeItem(API_KEY_SELECTED_FLAG);
+        } else {
+            errorMessage = err.message;
+        }
+      }
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [referenceScript, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity]);
+  }, [referenceScript, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, outputFormat]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans">
@@ -84,119 +228,134 @@ const App: React.FC = () => {
           </p>
         </header>
 
-        <div className="max-w-4xl mx-auto bg-gray-800/50 rounded-2xl shadow-2xl shadow-purple-500/10 p-6 md:p-8 space-y-8">
-          {/* Inputs Section */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="space-y-6">
-               <FileUpload onFileChange={handleFileChange} fileName={fileName} />
-               <TextAreaInput
-                id="user-story"
-                label="Добавьте вашу историю (необязательно)"
-                placeholder="Например, наша компания продает экологически чистые кофейные зерна из небольших ферм в Колумбии..."
-                value={userStory}
-                onChange={(e) => setUserStory(e.target.value)}
-                rows={5}
-              />
+        {!isApiKeySelected ? (
+            <div className="max-w-4xl mx-auto">
+                <ApiKeySelector onSelectKey={handleSelectKey} />
             </div>
-            <div className="space-y-4">
-                <h3 className="text-xl font-semibold text-white mb-4">Настройте голос вашего бота</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <SelectInput 
-                        id="writing-style"
-                        label="Стиль написания"
-                        value={writingStyle}
-                        onChange={(e) => setWritingStyle(e.target.value)}
-                        options={WRITING_STYLES}
-                    />
-                    <SelectInput 
-                        id="target-audience"
-                        label="Целевая аудитория"
-                        value={targetAudience}
-                        onChange={(e) => setTargetAudience(e.target.value)}
-                        options={TARGET_AUDIENCES}
-                    />
-                    <SelectInput 
-                        id="bot-goal"
-                        label="Основная цель"
-                        value={botGoal}
-                        onChange={(e) => setBotGoal(e.target.value)}
-                        options={BOT_GOALS}
-                    />
-                     <SelectInput 
-                        id="formality"
-                        label="Формальность"
-                        value={formality}
-                        onChange={(e) => setFormality(e.target.value)}
-                        options={FORMALITY_LEVELS}
-                    />
-                     <SelectInput 
-                        id="emoji-frequency"
-                        label="Частота эмодзи"
-                        value={emojiFrequency}
-                        onChange={(e) => setEmojiFrequency(e.target.value)}
-                        options={EMOJI_FREQUENCIES}
-                    />
-                     <SelectInput 
-                        id="response-length"
-                        label="Длина ответов"
-                        value={responseLength}
-                        onChange={(e) => setResponseLength(e.target.value)}
-                        options={RESPONSE_LENGTHS}
-                    />
-                     <SelectInput 
-                        id="language-complexity"
-                        label="Сложность языка"
-                        value={languageComplexity}
-                        onChange={(e) => setLanguageComplexity(e.target.value)}
-                        options={LANGUAGE_COMPLEXITIES}
-                    />
+        ) : (
+          <>
+            <div className="max-w-4xl mx-auto bg-gray-800/50 rounded-2xl shadow-2xl shadow-purple-500/10 p-6 md:p-8 space-y-8">
+              {/* Inputs Section */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-6">
+                   <FileUpload onFileChange={handleFileChange} fileName={fileName} />
+                   <TextAreaInput
+                    id="user-story"
+                    label="Добавьте вашу историю (необязательно)"
+                    placeholder="Например, наша компания продает экологически чистые кофейные зерна из небольших ферм в Колумбии..."
+                    value={userStory}
+                    onChange={(e) => setUserStory(e.target.value)}
+                    rows={5}
+                  />
                 </div>
+                <div className="space-y-4">
+                    <h3 className="text-xl font-semibold text-white mb-4">Настройте голос вашего бота</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <SelectInput 
+                            id="writing-style"
+                            label="Стиль написания"
+                            value={writingStyle}
+                            onChange={(e) => setWritingStyle(e.target.value)}
+                            options={WRITING_STYLES}
+                        />
+                        <SelectInput 
+                            id="target-audience"
+                            label="Целевая аудитория"
+                            value={targetAudience}
+                            onChange={(e) => setTargetAudience(e.target.value)}
+                            options={TARGET_AUDIENCES}
+                        />
+                        <SelectInput 
+                            id="bot-goal"
+                            label="Основная цель"
+                            value={botGoal}
+                            onChange={(e) => setBotGoal(e.target.value)}
+                            options={BOT_GOALS}
+                        />
+                         <SelectInput 
+                            id="formality"
+                            label="Формальность"
+                            value={formality}
+                            onChange={(e) => setFormality(e.target.value)}
+                            options={FORMALITY_LEVELS}
+                        />
+                         <SelectInput 
+                            id="emoji-frequency"
+                            label="Частота эмодзи"
+                            value={emojiFrequency}
+                            onChange={(e) => setEmojiFrequency(e.target.value)}
+                            options={EMOJI_FREQUENCIES}
+                        />
+                         <SelectInput 
+                            id="response-length"
+                            label="Длина ответов"
+                            value={responseLength}
+                            onChange={(e) => setResponseLength(e.target.value)}
+                            options={RESPONSE_LENGTHS}
+                        />
+                         <SelectInput 
+                            id="language-complexity"
+                            label="Сложность языка"
+                            value={languageComplexity}
+                            onChange={(e) => setLanguageComplexity(e.target.value)}
+                            options={LANGUAGE_COMPLEXITIES}
+                        />
+                         <SelectInput 
+                            id="output-format"
+                            label="Формат вывода"
+                            value={outputFormat}
+                            onChange={(e) => setOutputFormat(e.target.value)}
+                            options={OUTPUT_FORMATS}
+                        />
+                    </div>
+                </div>
+              </div>
+              
+              {/* Action Button */}
+              <div className="pt-4 border-t border-gray-700">
+                 <button
+                  onClick={handleGenerate}
+                  disabled={isLoading || !referenceScript}
+                  className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-purple-500/50 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
+                >
+                  {isLoading ? (
+                    <>
+                      <LoadingSpinner />
+                      <span>Генерация...</span>
+                    </>
+                  ) : (
+                    <>
+                      <MagicIcon />
+                      <span>Сгенерировать</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
-          
-          {/* Action Button */}
-          <div className="pt-4 border-t border-gray-700">
-             <button
-              onClick={handleGenerate}
-              disabled={isLoading || !referenceScript}
-              className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-purple-500/50 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
-            >
-              {isLoading ? (
-                <>
-                  <LoadingSpinner />
-                  <span>Генерация...</span>
-                </>
-              ) : (
-                <>
-                  <MagicIcon />
-                  <span>Сгенерировать</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
 
-        {/* Loading State */}
-        {isLoading && (
-            <div className="text-center mt-10">
-                <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-purple-400"></div>
-                <p className="mt-4 text-lg text-gray-300">{loadingMessage}</p>
-            </div>
-        )}
+            {/* Loading State */}
+            {isLoading && (
+                <div className="text-center mt-10">
+                    <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-purple-400"></div>
+                    <p className="mt-4 text-lg text-gray-300">{loadingMessage}</p>
+                </div>
+            )}
 
-        {/* Error Message */}
-        {error && (
-            <div className="max-w-4xl mx-auto mt-8 bg-red-900/50 border border-red-500 text-red-300 px-4 py-3 rounded-lg" role="alert">
-                <strong className="font-bold">Ой! </strong>
-                <span className="block sm:inline">{error}</span>
-            </div>
-        )}
+            {/* Error Message */}
+            {error && (
+                <div className="max-w-4xl mx-auto mt-8 bg-red-900/50 border border-red-500 text-red-300 px-4 py-3 rounded-lg" role="alert">
+                    <strong className="font-bold">Ой! </strong>
+                    <span className="block sm:inline">{error}</span>
+                </div>
+            )}
 
-        {/* Results Section */}
-        {generatedAssets && (
-          <div className="mt-12">
-            <GeneratedAssetsComponent assets={generatedAssets} />
-          </div>
+            {/* Results Section */}
+            {generatedAssets && (
+              <div className="mt-12">
+                <GeneratedAssetsComponent assets={generatedAssets} outputFormat={outputFormat} />
+              </div>
+            )}
+          </>
         )}
       </main>
     </div>
