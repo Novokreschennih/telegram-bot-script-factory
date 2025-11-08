@@ -1,7 +1,10 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import type { GeneratedAssets, TextGenerationResponse } from '../types';
 
 const getAiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const generateTextContent = async (
     mode: 'customize' | 'create',
@@ -14,7 +17,6 @@ const generateTextContent = async (
     emojiFrequency: string,
     responseLength: string,
     languageComplexity: string,
-    outputFormat: string
 ): Promise<TextGenerationResponse> => {
     const ai = getAiClient();
     const model = 'gemini-2.5-pro';
@@ -58,7 +60,6 @@ const generateTextContent = async (
             *   **Частота эмодзи:** ${emojiFrequency}
             *   **Длина ответов:** ${responseLengthInstruction}
             *   **Сложность языка:** ${languageComplexity}
-            *   **Требуемый формат вывода сценария:** ${outputFormat}
 
         **Твоя задача:**
 
@@ -73,7 +74,15 @@ const generateTextContent = async (
             "Каждый элемент списка должен быть строкой.",
             "Четко и лаконично суммируй основные функции."
           ],
-          "customizedScript": "Полный, переработанный сценарий чат-бота в указанном формате.",
+          "customizedScript": [
+             {
+                "text": "Текст первого сообщения от бота.",
+                "buttons": [[{"text": "Кнопка 1", "callback_data": "action1"}]]
+             },
+             {
+                "text": "Текст второго сообщения."
+             }
+          ],
           "scriptBlocks": [
             {
               "title": "Короткое, описательное название для ключевого блока/шага в сценарии.",
@@ -89,16 +98,12 @@ const generateTextContent = async (
         -   **description:** Сделай его привлекательным и соответствующим цели и тону бота.
         -   **capabilities:** Будь прямым и ясным. Начинай каждый пункт с глагола действия.
         -   **customizedScript:** Это самая важная часть. Перепиши весь сценарий (или создай с нуля), а не просто добавляй комментарии. Тон, лексика, структура предложений, использование эмодзи и длина ответов должны идеально отражать ВСЕ выбранные настройки.
-            -   **Форматирование:** Используй Markdown, совместимый с Telegram (*жирный текст* , _курсив_ , __подчеркнутый__), для улучшения читаемости. Используй логические отступы и пустые строки для разделения сообщений.
-            -   **Формат вывода:** Сгенерируй 'customizedScript' СТРОГО в формате "${outputFormat}".
-                -   **Markdown**: Верни весь сценарий как единую строку с Markdown-разметкой.
-                -   **Text**: Верни сценарий как единую строку, но без какой-либо Markdown-разметки.
-                -   **JSON**: Верни СТРОКУ, содержащую JSON-массив. Каждый элемент массива должен быть объектом вида \`{"message": "Текст сообщения здесь"}\`.
-                -   **n8n JSON**: Верни СТРОКУ, содержащую JSON-массив. Каждый элемент массива представляет узел сообщения n8n и должен иметь формат \`{"text": "Текст сообщения", "buttons": [[{"text": "Текст кнопки", "callback_data": "data"}]]}\`. Если у сообщения нет кнопок, поле "buttons" должно быть пустым массивом \`[]\`.
+            -   **Форматирование:** Используй Markdown, совместимый с Telegram (*жирный текст* , _курсив_ , __подчеркнутый__), внутри значения ключа \`text\` для улучшения читаемости.
+            -   **Структура вывода:** Верни сценарий СТРОГО в формате JSON-массива объектов. Каждый элемент массива — это объект, представляющий одно сообщение от бота. Объект должен иметь ключ \`text\` со строковым значением. Если у сообщения есть кнопки, добавь ключ \`buttons\` с массивом массивов объектов кнопок (формат Telegram Bot API: \`[[{"text": "Button 1", "callback_data": "data1"}]]\`).
         -   **scriptBlocks:** Определи 3-5 основных логических разделов в адаптированном сценарии. **Логический раздел — это группа сообщений, которая заканчивается предложением пользователю совершить действие (например, нажать на кнопки).** 'description' для каждого блока должен быть визуальным промптом на английском языке. Например: "A friendly robot waving hello to a new user, with message bubbles in the background, digital illustration style."
     `;
-
-    const response = await ai.models.generateContent({
+    
+    const requestConfig = {
         model,
         contents: prompt,
         config: {
@@ -109,7 +114,30 @@ const generateTextContent = async (
               profilePicturePrompt: { type: Type.STRING },
               description: { type: Type.STRING },
               capabilities: { type: Type.ARRAY, items: { type: Type.STRING } },
-              customizedScript: { type: Type.STRING },
+              customizedScript: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    text: { type: Type.STRING },
+                    buttons: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.ARRAY,
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            text: { type: Type.STRING },
+                            callback_data: { type: Type.STRING }
+                          },
+                          required: ['text', 'callback_data']
+                        }
+                      }
+                    }
+                  },
+                  required: ['text']
+                }
+              },
               scriptBlocks: {
                 type: Type.ARRAY,
                 items: {
@@ -125,10 +153,41 @@ const generateTextContent = async (
             required: ['profilePicturePrompt', 'description', 'capabilities', 'customizedScript', 'scriptBlocks']
           }
         }
-    });
+    };
+    
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+    while (attempt < MAX_RETRIES) {
+        try {
+            const response = await ai.models.generateContent(requestConfig);
 
-    const jsonText = response.text.trim();
-    return JSON.parse(jsonText) as TextGenerationResponse;
+            const jsonText = response.text.trim();
+            try {
+                return JSON.parse(jsonText) as TextGenerationResponse;
+            } catch (e) {
+                console.error("Failed to parse model response:", jsonText);
+                throw new SyntaxError("Model returned invalid JSON.");
+            }
+        } catch (err: any) {
+            attempt++;
+            const isRetryable = err instanceof Error && (
+                err.message.includes('503') || 
+                err.message.includes('UNAVAILABLE') || 
+                err.message.includes('The model is overloaded')
+            );
+
+            if (isRetryable && attempt < MAX_RETRIES) {
+                const delay = Math.pow(2, attempt) * 1000; // 2s, 4s
+                console.warn(`Attempt ${attempt} failed with a retryable error. Retrying in ${delay / 1000}s...`);
+                await sleep(delay);
+            } else {
+                console.error(`Generation failed on attempt ${attempt}.`, err);
+                throw err; // Re-throw the last error to be handled by the UI
+            }
+        }
+    }
+    // Fallback error, should not be reached if MAX_RETRIES > 0.
+    throw new Error('Generation failed after multiple retries.');
 };
 
 export const generateBotAssets = async (
@@ -142,7 +201,6 @@ export const generateBotAssets = async (
     emojiFrequency: string,
     responseLength: string,
     languageComplexity: string,
-    outputFormat: string,
 ): Promise<GeneratedAssets> => {
     
     const textData = await generateTextContent(
@@ -156,7 +214,6 @@ export const generateBotAssets = async (
         emojiFrequency,
         responseLength,
         languageComplexity,
-        outputFormat
     );
 
     return {

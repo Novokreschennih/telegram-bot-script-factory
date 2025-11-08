@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { generateBotAssets } from './services/geminiService';
 import type { GeneratedAssets } from './types';
@@ -9,6 +10,10 @@ import GeneratedAssetsComponent from './components/GeneratedAssets';
 import LoadingSpinner from './components/LoadingSpinner';
 import ApiKeySelector from './components/ApiKeySelector';
 import { MagicIcon } from './components/icons/MagicIcon';
+import LandingPage from './components/LandingPage';
+import FloatingIcons from './components/FloatingIcons';
+import Modal from './components/Modal';
+import InstructionsModal from './components/InstructionsModal';
 
 declare global {
   interface AIStudio {
@@ -25,6 +30,7 @@ const APP_STATE_STORAGE_KEY = 'botCustomizerState';
 const API_KEY_SELECTED_FLAG = 'apiKeySelected';
 
 type AppMode = 'customize' | 'create';
+type AppView = 'landing' | 'app';
 
 interface AppState {
     mainInputText: string;
@@ -37,11 +43,14 @@ interface AppState {
     emojiFrequency: string;
     responseLength: string;
     languageComplexity: string;
-    outputFormat: string;
     mode: AppMode;
 }
 
 const App: React.FC = () => {
+  const [view, setView] = useState<AppView>('landing');
+  const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [isInstructionsModalOpen, setInstructionsModalOpen] = useState(false);
+
   const [isApiKeySelected, setIsApiKeySelected] = useState<boolean>(false);
   
   const [mode, setMode] = useState<AppMode>('customize');
@@ -55,7 +64,6 @@ const App: React.FC = () => {
   const [emojiFrequency, setEmojiFrequency] = useState<string>(EMOJI_FREQUENCIES[0].value);
   const [responseLength, setResponseLength] = useState<string>(RESPONSE_LENGTHS[0].value);
   const [languageComplexity, setLanguageComplexity] = useState<string>(LANGUAGE_COMPLEXITIES[0].value);
-  const [outputFormat, setOutputFormat] = useState<string>(OUTPUT_FORMATS[0].value);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
@@ -78,7 +86,6 @@ const App: React.FC = () => {
         setEmojiFrequency(savedState.emojiFrequency || EMOJI_FREQUENCIES[0].value);
         setResponseLength(savedState.responseLength || RESPONSE_LENGTHS[0].value);
         setLanguageComplexity(savedState.languageComplexity || LANGUAGE_COMPLEXITIES[0].value);
-        setOutputFormat(savedState.outputFormat || OUTPUT_FORMATS[0].value);
         setMode(savedState.mode || 'customize');
       }
     } catch (e) {
@@ -99,32 +106,30 @@ const App: React.FC = () => {
       emojiFrequency,
       responseLength,
       languageComplexity,
-      outputFormat,
       mode,
     };
     localStorage.setItem(APP_STATE_STORAGE_KEY, JSON.stringify(appState));
   }, [
     mainInputText, fileName, userStory, writingStyle, targetAudience,
-    botGoal, formality, emojiFrequency, responseLength, languageComplexity, outputFormat, mode
+    botGoal, formality, emojiFrequency, responseLength, languageComplexity, mode
   ]);
 
 
   useEffect(() => {
     const checkApiKey = async () => {
-      if (localStorage.getItem(API_KEY_SELECTED_FLAG)) {
-        setIsApiKeySelected(true);
-      }
-      
       if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
         const hasKey = await window.aistudio.hasSelectedApiKey();
         setIsApiKeySelected(hasKey);
-        if (!hasKey) {
+        if (hasKey) {
+          localStorage.setItem(API_KEY_SELECTED_FLAG, 'true');
+        } else {
           localStorage.removeItem(API_KEY_SELECTED_FLAG);
         }
+      } else if (localStorage.getItem(API_KEY_SELECTED_FLAG)) {
+        setIsApiKeySelected(true);
       }
     };
-    const timeoutId = setTimeout(checkApiKey, 100);
-    return () => clearTimeout(timeoutId);
+    checkApiKey();
   }, []);
 
   const handleSelectKey = async () => {
@@ -132,6 +137,7 @@ const App: React.FC = () => {
       await window.aistudio.openSelectKey();
       setIsApiKeySelected(true);
       localStorage.setItem(API_KEY_SELECTED_FLAG, 'true');
+      setSettingsModalOpen(false); // Close modal on success
     }
   };
   
@@ -182,6 +188,11 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = useCallback(async () => {
+    if (!isApiKeySelected) {
+      setError("Пожалуйста, выберите API-ключ в настройках, чтобы начать генерацию.");
+      setSettingsModalOpen(true);
+      return;
+    }
     if (!mainInputText) {
       setError(mode === 'customize' ? 'Пожалуйста, сначала загрузите референсный сценарий.' : 'Пожалуйста, опишите идею вашего бота.');
       return;
@@ -202,20 +213,26 @@ const App: React.FC = () => {
         formality,
         emojiFrequency,
         responseLength,
-        languageComplexity,
-        outputFormat
+        languageComplexity
       );
       setGeneratedAssets(assets);
     } catch (err) {
-      console.error(err);
-      let errorMessage = 'Произошла неизвестная ошибка.';
-       if (err instanceof Error) {
+      console.error("Generation failed:", err);
+      let errorMessage = 'Произошла неизвестная ошибка. Пожалуйста, попробуйте еще раз или проверьте консоль разработчика для получения дополнительной информации.';
+       
+      if (err instanceof Error) {
         if (err.message.includes('Requested entity was not found.')) {
             errorMessage = 'Ваш API-ключ недействителен или не имеет доступа к необходимым моделям. Пожалуйста, выберите другой ключ и попробуйте снова.';
             setIsApiKeySelected(false);
             localStorage.removeItem(API_KEY_SELECTED_FLAG);
+        } else if (err.message.includes('The model is overloaded') || err.message.includes('UNAVAILABLE')) {
+            errorMessage = 'Модель искусственного интеллекта в данный момент перегружена из-за высокого спроса. Пожалуйста, подождите немного и попробуйте снова.';
+        } else if (err instanceof SyntaxError || err.message.toLowerCase().includes('json')) {
+            errorMessage = 'Ошибка обработки ответа ИИ. Модель вернула данные в неверном формате. Это может произойти со сложными сценариями. Попробуйте упростить запрос или изменить настройки.';
+        } else if (err.message.toLowerCase().includes('block') && err.message.toLowerCase().includes('safety')) {
+             errorMessage = 'Ответ был заблокирован из-за настроек безопасности. Пожалуйста, измените свой запрос.';
         } else {
-            errorMessage = err.message;
+            errorMessage = `Произошла ошибка: ${err.message}`;
         }
       }
       setError(errorMessage);
@@ -223,7 +240,7 @@ const App: React.FC = () => {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [mode, mainInputText, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, outputFormat]);
+  }, [isApiKeySelected, mode, mainInputText, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity]);
 
   const availableResponseLengths = useMemo(() => {
     if (mode === 'customize') {
@@ -239,25 +256,30 @@ const App: React.FC = () => {
       setResponseLength('As in original');
     }
   }, [mode]);
+  
+  const generateButtonTooltip = !isApiKeySelected 
+    ? "Пожалуйста, выберите API-ключ в настройках" 
+    : !mainInputText 
+      ? (mode === 'customize' ? 'Пожалуйста, загрузите сценарий' : 'Пожалуйста, опишите идею бота')
+      : 'Сгенерировать';
+
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans">
       <main className="container mx-auto px-4 py-8 md:py-12">
-        <header className="text-center mb-10">
-          <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
-            Кастомизатор сценариев для Telegram-бота
-          </h1>
-          <p className="mt-4 text-lg text-gray-400 max-w-3xl mx-auto">
-             Адаптируйте существующий сценарий или создайте новый с нуля. Загрузите текст, добавьте детали, и ИИ сгенерирует полный пакет брендинга и контента.
-          </p>
-        </header>
-
-        {!isApiKeySelected ? (
-            <div className="max-w-4xl mx-auto">
-                <ApiKeySelector onSelectKey={handleSelectKey} />
-            </div>
+        {view === 'landing' ? (
+          <LandingPage onStart={() => setView('app')} />
         ) : (
           <>
+            <header className="text-center mb-10">
+              <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
+                Кастомизатор сценариев для Telegram-бота
+              </h1>
+              <p className="mt-4 text-lg text-gray-400 max-w-3xl mx-auto">
+                Адаптируйте существующий сценарий или создайте новый с нуля. Загрузите текст, добавьте детали, и ИИ сгенерирует полный пакет брендинга и контента.
+              </p>
+            </header>
+            
             <div className="max-w-4xl mx-auto bg-gray-800/50 rounded-2xl shadow-2xl shadow-purple-500/10 p-6 md:p-8 space-y-8">
               
               <div className="flex justify-center border-b border-gray-700">
@@ -356,23 +378,28 @@ const App: React.FC = () => {
                             onChange={(e) => setLanguageComplexity(e.target.value)}
                             options={LANGUAGE_COMPLEXITIES}
                         />
-                         <SelectInput 
-                            id="output-format"
-                            label="Формат вывода"
-                            value={outputFormat}
-                            onChange={(e) => setOutputFormat(e.target.value)}
-                            options={OUTPUT_FORMATS}
-                        />
                     </div>
                 </div>
               </div>
               
               {/* Action Button */}
-              <div className="pt-4 border-t border-gray-700">
+              <div className="pt-4 border-t border-gray-700 space-y-4">
+                {!isApiKeySelected && !isLoading && (
+                  <div className="bg-yellow-900/50 border border-yellow-600 text-yellow-200 px-4 py-3 rounded-lg flex items-center justify-between gap-4">
+                    <span>Для генерации контента требуется API-ключ.</span>
+                    <button 
+                      onClick={() => setSettingsModalOpen(true)}
+                      className="font-bold hover:underline whitespace-nowrap"
+                    >
+                      Выбрать ключ
+                    </button>
+                  </div>
+                )}
                  <button
                   onClick={handleGenerate}
-                  disabled={isLoading || !mainInputText}
-                  className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-purple-500/50 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
+                  disabled={isLoading || !mainInputText || !isApiKeySelected}
+                  title={generateButtonTooltip}
+                  className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-purple-500/50 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 disabled:shadow-none"
                 >
                   {isLoading ? (
                     <>
@@ -408,12 +435,29 @@ const App: React.FC = () => {
             {/* Results Section */}
             {generatedAssets && (
               <div className="mt-12">
-                <GeneratedAssetsComponent assets={generatedAssets} outputFormat={outputFormat} />
+                <GeneratedAssetsComponent assets={generatedAssets} />
               </div>
             )}
           </>
         )}
       </main>
+
+      <FloatingIcons 
+        onSettingsClick={() => setSettingsModalOpen(true)}
+        onInstructionsClick={() => setInstructionsModalOpen(true)}
+      />
+
+      {isSettingsModalOpen && (
+          <Modal title="Настройки API-ключа" onClose={() => setSettingsModalOpen(false)}>
+              <ApiKeySelector onSelectKey={handleSelectKey} />
+          </Modal>
+      )}
+
+      {isInstructionsModalOpen && (
+          <Modal title="Как использовать приложение" onClose={() => setInstructionsModalOpen(false)}>
+              <InstructionsModal />
+          </Modal>
+      )}
     </div>
   );
 };
