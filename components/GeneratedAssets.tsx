@@ -36,12 +36,193 @@ const scriptToJson = (script: ScriptNode[]): string => {
     return JSON.stringify(script, null, 2);
 };
 
+// Helper to generate a simple UUID v4
+const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
 const scriptToN8nJson = (script: ScriptNode[]): string => {
-    const n8nNodes = script.map(node => ({
-      text: node.text,
-      buttons: node.buttons || []
-    }));
-    return JSON.stringify(n8nNodes, null, 2);
+    const nodes: any[] = [];
+    const connections: any = {};
+    const initialX = -1000;
+    const initialY = 400;
+
+    // 1. Telegram Trigger Node
+    const triggerNode = {
+        parameters: { updates: ["message", "callback_query"], additionalFields: {} },
+        id: generateUUID(),
+        name: "Telegram Trigger",
+        type: "n8n-nodes-base.telegramTrigger",
+        typeVersion: 1.1,
+        position: [initialX, initialY],
+        credentials: { telegramApi: { id: "YOUR_CREDENTIALS_ID", name: "YOUR_TELEGRAM_CREDENTIALS" } }
+    };
+    nodes.push(triggerNode);
+
+    // 2. Set User Data Node
+    const setUserDataNode = {
+        parameters: {
+            assignments: {
+                assignments: [
+                    { id: generateUUID(), name: "chat_id", value: "={{ $('Telegram Trigger').item.json.callback_query ? $('Telegram Trigger').item.json.callback_query.message.chat.id : $('Telegram Trigger').item.json.message.chat.id }}", type: "string" },
+                    { id: generateUUID(), name: "first_name", value: "={{ $('Telegram Trigger').item.json.callback_query ? $('Telegram Trigger').item.json.callback_query.from.first_name : $('Telegram Trigger').item.json.message.from.first_name }}", type: "string" },
+                    { id: generateUUID(), name: "input_data", value: "={{ $('Telegram Trigger').item.json.callback_query ? $('Telegram Trigger').item.json.callback_query.data : $('Telegram Trigger').item.json.message.text }}", type: "string" }
+                ]
+            },
+            options: {}
+        },
+        id: generateUUID(),
+        name: "Set User Data",
+        type: "n8n-nodes-base.set",
+        typeVersion: 3.4,
+        position: [initialX + 220, initialY]
+    };
+    nodes.push(setUserDataNode);
+    connections[triggerNode.name] = { main: [[{ node: setUserDataNode.name, type: "main", index: 0 }]] };
+    
+    // 3. Main Router (Switch) Node
+    const routerNode = {
+        parameters: { rules: { values: [] }, options: {} },
+        id: generateUUID(),
+        name: "Main Router",
+        type: "n8n-nodes-base.switch",
+        typeVersion: 3.2,
+        position: [initialX + 440, initialY]
+    };
+    connections[setUserDataNode.name] = { main: [[{ node: routerNode.name, type: "main", index: 0 }]] };
+
+    // 4. Create all message and wait nodes
+    const messageNodes: any[] = [];
+    script.forEach((node, index) => {
+        const messageNode = {
+            parameters: {
+                chatId: "={{ $('Set User Data').item.json.chat_id }}",
+                text: node.text,
+                additionalFields: {}
+            },
+            id: generateUUID(),
+            name: `БЛОК ${index + 1}: Сообщение`,
+            type: "n8n-nodes-base.telegram",
+            typeVersion: 1.2,
+            position: [0, 0], // Placeholder position
+            credentials: { telegramApi: { id: "YOUR_CREDENTIALS_ID", name: "YOUR_TELEGRAM_CREDENTIALS" } }
+        };
+        if (node.buttons && node.buttons.length > 0) {
+            // FIX: Cast parameters to `any` to allow adding `replyMarkup`, as it doesn't exist on the inferred type.
+            (messageNode.parameters as any).replyMarkup = "inlineKeyboard";
+            (messageNode.parameters as any).inlineKeyboard = {
+                rows: node.buttons.map(buttonRow => ({
+                    row: {
+                        buttons: buttonRow.map(button => ({
+                            text: button.text,
+                            additionalFields: { callback_data: button.callback_data }
+                        }))
+                    }
+                }))
+            };
+        }
+        messageNodes.push(messageNode);
+    });
+
+    // 5. Build connections and create router rules
+    const routerConnections: any[][] = [];
+    
+    // Rule for /start
+    if (messageNodes.length > 0) {
+        routerNode.parameters.rules.values.push({
+            conditions: {
+                options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 2 },
+                conditions: [{
+                    id: generateUUID(),
+                    leftValue: "={{ $json.input_data }}",
+                    rightValue: "/start",
+                    operator: { type: "string", operation: "equals" }
+                }],
+                combinator: "and"
+            }
+        });
+        routerConnections.push([{ node: messageNodes[0].name, type: "main", index: 0 }]);
+    }
+
+    const branches: any[][] = [];
+    let currentBranch: any[] = [];
+
+    messageNodes.forEach((msgNode, index) => {
+        currentBranch.push(msgNode);
+        if ((msgNode.parameters as any).replyMarkup === 'inlineKeyboard' || index === messageNodes.length - 1) {
+            branches.push(currentBranch);
+            currentBranch = [];
+        }
+    });
+
+    let branchStartY = initialY - 600;
+    branches.forEach((branch, branchIndex) => {
+        let branchX = initialX + 660;
+        
+        // Connect router to the start of the branch
+        if (branchIndex > 0) {
+            const previousBranch = branches[branchIndex - 1];
+            const triggerNode = previousBranch[previousBranch.length - 1];
+            
+            const callbacks = (triggerNode.parameters as any).inlineKeyboard.rows
+                .flatMap((r: any) => r.row.buttons)
+                .map((b: any) => b.additionalFields.callback_data);
+            
+            if (callbacks.length > 0) {
+                const conditions = callbacks.map((cb: string) => ({
+                    id: generateUUID(),
+                    leftValue: "={{ $json.input_data }}",
+                    rightValue: cb,
+                    operator: { type: "string", operation: "equals" }
+                }));
+                routerNode.parameters.rules.values.push({
+                    conditions: {
+                        options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 2 },
+                        conditions: conditions,
+                        combinator: "or"
+                    }
+                });
+                routerConnections.push([{ node: branch[0].name, type: "main", index: 0 }]);
+            }
+        }
+        
+        branch.forEach((node, nodeIndex) => {
+            node.position = [branchX, branchStartY];
+            nodes.push(node);
+
+            if (nodeIndex < branch.length - 1) {
+                branchX += 220;
+                const waitNode = {
+                    parameters: { amount: 15 },
+                    id: generateUUID(),
+                    name: `Wait ${nodes.length}`,
+                    type: "n8n-nodes-base.wait",
+                    typeVersion: 1.1,
+                    position: [branchX, branchStartY],
+                };
+                nodes.push(waitNode);
+                connections[node.name] = { main: [[{ node: waitNode.name, type: "main", index: 0 }]] };
+                connections[waitNode.name] = { main: [[{ node: branch[nodeIndex + 1].name, type: "main", index: 0 }]] };
+                branchX += 220;
+            }
+        });
+        branchStartY += 250;
+    });
+    
+    nodes.push(routerNode);
+    connections[routerNode.name] = { main: routerConnections };
+
+    const n8nWorkflow = {
+        nodes,
+        connections,
+        meta: { instanceId: generateUUID().substring(0, 64) },
+        pinData: {}
+    };
+    
+    return JSON.stringify(n8nWorkflow, null, 2);
 };
 
 // Helper to parse simple Telegram-like Markdown for preview

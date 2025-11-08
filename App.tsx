@@ -131,6 +131,18 @@ const App: React.FC = () => {
     };
     checkApiKey();
   }, []);
+  
+  const handleModeChange = (newMode: AppMode) => {
+    if (mode === newMode) return;
+
+    setMode(newMode);
+    // Reset state related to a specific mode's input
+    setMainInputText('');
+    setFileName('');
+    setUserStory('');
+    setError(null);
+    setGeneratedAssets(null);
+  };
 
   const handleSelectKey = async () => {
     if (window.aistudio?.openSelectKey) {
@@ -284,13 +296,13 @@ const App: React.FC = () => {
               
               <div className="flex justify-center border-b border-gray-700">
                 <button 
-                  onClick={() => setMode('customize')}
+                  onClick={() => handleModeChange('customize')}
                   className={`px-6 py-3 text-lg font-medium transition-colors duration-300 ${mode === 'customize' ? 'border-b-2 border-purple-400 text-white' : 'text-gray-500 hover:text-gray-300'}`}
                 >
                   Кастомизация
                 </button>
                 <button 
-                  onClick={() => setMode('create')}
+                  onClick={() => handleModeChange('create')}
                   className={`px-6 py-3 text-lg font-medium transition-colors duration-300 ${mode === 'create' ? 'border-b-2 border-purple-400 text-white' : 'text-gray-500 hover:text-gray-300'}`}
                 >
                   Создание с нуля
