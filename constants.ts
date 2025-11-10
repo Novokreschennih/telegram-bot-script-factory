@@ -1,3 +1,6 @@
+
+export const PIN_AUTH_SERVICE_URL = 'https://pin-auth-service2.vercel.app/api/validate';
+
 export const WRITING_STYLES = [
   { value: 'Helpful and Professional', label: 'Полезный и профессиональный' },
   { value: 'Friendly and Conversational', label: 'Дружелюбный и разговорный' },
@@ -25,6 +28,14 @@ export const BOT_GOALS = [
   { value: 'E-commerce Sales', label: 'Продажи в e-commerce' },
   { value: 'Information Delivery', label: 'Предоставление информации' },
   { value: 'Onboarding New Users', label: 'Онбординг новых пользователей' },
+];
+
+export const SALES_FRAMEWORKS = [
+  { value: 'None', label: 'Не использовать' },
+  { value: 'AIDA', label: 'AIDA (Внимание, Интерес, Желание, Действие)' },
+  { value: 'PAS', label: 'PAS (Проблема, Агитация, Решение)' },
+  { value: 'FAB', label: 'FAB (Свойства, Преимущества, Выгоды)' },
+  { value: 'Storytelling', label: 'Сторителлинг' },
 ];
 
 export const FORMALITY_LEVELS = [

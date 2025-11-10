@@ -272,6 +272,7 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) =>
   const [scriptCopied, setScriptCopied] = useState(false);
   const [showRawCode, setShowRawCode] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState<string>(OUTPUT_FORMATS[0].value);
+  const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
 
   const formattedScript = useMemo(() => {
     if (!assets.customizedScript) return '';
@@ -318,6 +319,14 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) =>
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+  
+  const handleCopyMessage = (text: string, index: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedMessageIndex(index);
+    setTimeout(() => {
+      setCopiedMessageIndex(null);
+    }, 2000);
+  };
 
   return (
     <div className="space-y-12">
@@ -352,17 +361,37 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) =>
 
       {/* Customized Script Section */}
       <section className="bg-gray-800/50 rounded-2xl p-6 md:p-8">
-        <h2 className="text-3xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">
-          Предпросмотр сценария
-        </h2>
+        <div className="text-center">
+            <h2 className="text-3xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">
+                Предпросмотр сценария
+            </h2>
+            <p className="text-gray-400 mb-6">Нажмите на любое сообщение, чтобы скопировать его текст с форматированием.</p>
+        </div>
         
         {/* Chat Preview */}
         <div className="bg-gray-900/70 rounded-lg p-4 space-y-4 max-h-[600px] overflow-y-auto mb-6">
           {assets.customizedScript.map((node, index) => (
-            <div key={index} className="flex flex-col items-start">
-              <div className="bg-purple-900/40 rounded-lg rounded-tl-none p-3 max-w-xl">
-                <p className="text-gray-200 whitespace-pre-wrap">{parseTelegramMarkdown(node.text)}</p>
-              </div>
+            <div key={index} className="flex flex-col items-start group relative">
+                <button
+                    onClick={() => handleCopyMessage(node.text, index)}
+                    className="w-full text-left bg-purple-900/40 rounded-lg rounded-tl-none p-3 max-w-xl hover:bg-purple-900/60 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    aria-label="Скопировать сообщение"
+                >
+                    <p className="text-gray-200 whitespace-pre-wrap">{parseTelegramMarkdown(node.text)}</p>
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        {copiedMessageIndex === index ? (
+                            <span className="flex items-center gap-1 text-xs bg-green-800/80 text-green-300 px-2 py-1 rounded-md">
+                            <CheckIcon />
+                            Скопировано
+                            </span>
+                        ) : (
+                            <span className="flex items-center gap-1 text-xs bg-gray-700/80 text-gray-300 px-2 py-1 rounded-md">
+                            <CopyIcon />
+                            Копировать
+                            </span>
+                        )}
+                    </div>
+                </button>
               {node.buttons && node.buttons.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-2">
                   {node.buttons.flat().map((button, btnIndex) => (

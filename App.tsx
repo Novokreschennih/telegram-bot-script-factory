@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { generateBotAssets } from './services/geminiService';
 import type { GeneratedAssets } from './types';
-import { WRITING_STYLES, TARGET_AUDIENCES, BOT_GOALS, FORMALITY_LEVELS, EMOJI_FREQUENCIES, RESPONSE_LENGTHS, LANGUAGE_COMPLEXITIES, OUTPUT_FORMATS } from './constants';
+import { WRITING_STYLES, TARGET_AUDIENCES, BOT_GOALS, FORMALITY_LEVELS, EMOJI_FREQUENCIES, RESPONSE_LENGTHS, LANGUAGE_COMPLEXITIES, SALES_FRAMEWORKS } from './constants';
 import FileUpload from './components/FileUpload';
 import TextAreaInput from './components/TextAreaInput';
 import SelectInput from './components/SelectInput';
@@ -14,6 +14,8 @@ import LandingPage from './components/LandingPage';
 import FloatingIcons from './components/FloatingIcons';
 import Modal from './components/Modal';
 import InstructionsModal from './components/InstructionsModal';
+import PinValidation from './components/PinValidation';
+import LegalContent from './components/LegalContent';
 
 declare global {
   interface AIStudio {
@@ -28,9 +30,10 @@ declare global {
 
 const APP_STATE_STORAGE_KEY = 'botCustomizerState';
 const API_KEY_SELECTED_FLAG = 'apiKeySelected';
+const AUTH_STATUS_KEY = 'isAuthenticated';
 
 type AppMode = 'customize' | 'create';
-type AppView = 'landing' | 'app';
+type AppView = 'landing' | 'pin' | 'app';
 
 interface AppState {
     mainInputText: string;
@@ -43,13 +46,22 @@ interface AppState {
     emojiFrequency: string;
     responseLength: string;
     languageComplexity: string;
+    salesFramework: string;
     mode: AppMode;
 }
 
+const getInitialView = (): AppView => {
+    if (typeof window !== 'undefined' && localStorage.getItem(AUTH_STATUS_KEY) === 'true') {
+        return 'app';
+    }
+    return 'landing';
+};
+
 const App: React.FC = () => {
-  const [view, setView] = useState<AppView>('landing');
+  const [view, setView] = useState<AppView>(getInitialView());
   const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
   const [isInstructionsModalOpen, setInstructionsModalOpen] = useState(false);
+  const [isPolicyModalOpen, setPolicyModalOpen] = useState(false);
 
   const [isApiKeySelected, setIsApiKeySelected] = useState<boolean>(false);
   
@@ -64,6 +76,7 @@ const App: React.FC = () => {
   const [emojiFrequency, setEmojiFrequency] = useState<string>(EMOJI_FREQUENCIES[0].value);
   const [responseLength, setResponseLength] = useState<string>(RESPONSE_LENGTHS[0].value);
   const [languageComplexity, setLanguageComplexity] = useState<string>(LANGUAGE_COMPLEXITIES[0].value);
+  const [salesFramework, setSalesFramework] = useState<string>(SALES_FRAMEWORKS[0].value);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
@@ -86,6 +99,7 @@ const App: React.FC = () => {
         setEmojiFrequency(savedState.emojiFrequency || EMOJI_FREQUENCIES[0].value);
         setResponseLength(savedState.responseLength || RESPONSE_LENGTHS[0].value);
         setLanguageComplexity(savedState.languageComplexity || LANGUAGE_COMPLEXITIES[0].value);
+        setSalesFramework(savedState.salesFramework || SALES_FRAMEWORKS[0].value);
         setMode(savedState.mode || 'customize');
       }
     } catch (e) {
@@ -106,12 +120,13 @@ const App: React.FC = () => {
       emojiFrequency,
       responseLength,
       languageComplexity,
+      salesFramework,
       mode,
     };
     localStorage.setItem(APP_STATE_STORAGE_KEY, JSON.stringify(appState));
   }, [
     mainInputText, fileName, userStory, writingStyle, targetAudience,
-    botGoal, formality, emojiFrequency, responseLength, languageComplexity, mode
+    botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework, mode
   ]);
 
 
@@ -225,7 +240,8 @@ const App: React.FC = () => {
         formality,
         emojiFrequency,
         responseLength,
-        languageComplexity
+        languageComplexity,
+        salesFramework
       );
       setGeneratedAssets(assets);
     } catch (err) {
@@ -252,7 +268,7 @@ const App: React.FC = () => {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [isApiKeySelected, mode, mainInputText, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity]);
+  }, [isApiKeySelected, mode, mainInputText, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework]);
 
   const availableResponseLengths = useMemo(() => {
     if (mode === 'customize') {
@@ -275,14 +291,35 @@ const App: React.FC = () => {
       ? (mode === 'customize' ? 'Пожалуйста, загрузите сценарий' : 'Пожалуйста, опишите идею бота')
       : 'Сгенерировать';
 
+  const handlePinSuccess = () => {
+    localStorage.setItem(AUTH_STATUS_KEY, 'true');
+    setView('app');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem(AUTH_STATUS_KEY);
+    setView('landing');
+    setSettingsModalOpen(false); // Close modal on logout
+  };
+
+  if (view === 'landing') {
+    return (
+      <div className="min-h-screen bg-gray-900 text-gray-200 font-sans">
+        <main className="container mx-auto px-4 py-8 md:py-12">
+            <LandingPage onStart={() => setView('pin')} />
+        </main>
+      </div>
+    );
+  }
+
+  if (view === 'pin') {
+    return <PinValidation onSuccess={handlePinSuccess} appId="app3" />;
+  }
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans">
       <main className="container mx-auto px-4 py-8 md:py-12">
-        {view === 'landing' ? (
-          <LandingPage onStart={() => setView('app')} />
-        ) : (
-          <>
+        <>
             <header className="text-center mb-10">
               <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
                 Кастомизатор сценариев для Telegram-бота
@@ -361,6 +398,13 @@ const App: React.FC = () => {
                             value={botGoal}
                             onChange={(e) => setBotGoal(e.target.value)}
                             options={BOT_GOALS}
+                        />
+                        <SelectInput 
+                            id="sales-framework"
+                            label="Модель продаж"
+                            value={salesFramework}
+                            onChange={(e) => setSalesFramework(e.target.value)}
+                            options={SALES_FRAMEWORKS}
                         />
                          <SelectInput 
                             id="formality"
@@ -450,24 +494,40 @@ const App: React.FC = () => {
                 <GeneratedAssetsComponent assets={generatedAssets} />
               </div>
             )}
-          </>
-        )}
+        </>
       </main>
 
       <FloatingIcons 
         onSettingsClick={() => setSettingsModalOpen(true)}
         onInstructionsClick={() => setInstructionsModalOpen(true)}
+        onPolicyClick={() => setPolicyModalOpen(true)}
       />
 
       {isSettingsModalOpen && (
-          <Modal title="Настройки API-ключа" onClose={() => setSettingsModalOpen(false)}>
-              <ApiKeySelector onSelectKey={handleSelectKey} />
+          <Modal title="Настройки" onClose={() => setSettingsModalOpen(false)}>
+              <div className="space-y-8">
+                  <ApiKeySelector onSelectKey={handleSelectKey} />
+                  <div className="pt-4 border-t border-gray-700">
+                      <button
+                          onClick={handleLogout}
+                          className="w-full bg-red-800/50 hover:bg-red-700/60 text-red-300 font-bold py-2 px-4 rounded-lg transition-colors"
+                      >
+                          Выйти
+                      </button>
+                  </div>
+              </div>
           </Modal>
       )}
 
       {isInstructionsModalOpen && (
           <Modal title="Как использовать приложение" onClose={() => setInstructionsModalOpen(false)}>
               <InstructionsModal />
+          </Modal>
+      )}
+
+      {isPolicyModalOpen && (
+          <Modal title="Политика конфиденциальности и Условия использования" onClose={() => setPolicyModalOpen(false)}>
+              <LegalContent />
           </Modal>
       )}
     </div>

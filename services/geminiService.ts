@@ -6,6 +6,22 @@ const getAiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY as strin
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+const getSalesFrameworkInstruction = (framework: string): string => {
+    switch (framework) {
+        case 'AIDA':
+            return 'AIDA (Внимание, Интерес, Желание, Действие). Структурируй диалог, чтобы сначала привлечь внимание пользователя, затем вызвать интерес к продукту/услуге, после этого создать сильное желание и, наконец, предложить четкое действие.';
+        case 'PAS':
+            return 'PAS (Проблема, Агитация, Решение). Начни с определения проблемы пользователя, затем усугуби ее (покажи негативные последствия), и после этого представь свой продукт как идеальное решение.';
+        case 'FAB':
+            return 'FAB (Свойства, Преимущества, Выгоды). Фокусируйся на том, чтобы сначала описать свойство продукта, затем объяснить его преимущество и, самое главное, показать личную выгоду для клиента.';
+        case 'Storytelling':
+            return 'Сторителлинг. Построй повествование вокруг истории (например, истории клиента или компании), чтобы эмоционально вовлечь пользователя и сделать предложение более запоминающимся.';
+        case 'None':
+        default:
+            return 'Не используется. Создавай логичный и последовательный диалог без привязки к конкретной маркетинговой модели.';
+    }
+};
+
 const generateTextContent = async (
     mode: 'customize' | 'create',
     mainInputText: string,
@@ -17,6 +33,7 @@ const generateTextContent = async (
     emojiFrequency: string,
     responseLength: string,
     languageComplexity: string,
+    salesFramework: string,
 ): Promise<TextGenerationResponse> => {
     const ai = getAiClient();
     const model = 'gemini-2.5-pro';
@@ -43,6 +60,8 @@ const generateTextContent = async (
       ? 'Сохраняй длину и структуру сообщений как можно ближе к исходному сценарию. Твоя задача — изменить тон и стиль, а не темп диалога.'
       : responseLength;
 
+    const salesFrameworkInstruction = getSalesFrameworkInstruction(salesFramework);
+
     const prompt = `
         Ты — эксперт по написанию сценариев для чат-ботов Telegram и специалист по брендингу. ${coreTaskInstruction}
 
@@ -56,6 +75,7 @@ const generateTextContent = async (
             *   **Стиль написания:** ${writingStyle}
             *   **Целевая аудитория:** ${targetAudience}
             *   **Основная цель:** ${botGoal}
+            *   **Маркетинговая модель продаж:** ${salesFrameworkInstruction}
             *   **Уровень формальности:** ${formality}
             *   **Частота эмодзи:** ${emojiFrequency}
             *   **Длина ответов:** ${responseLengthInstruction}
@@ -97,7 +117,7 @@ const generateTextContent = async (
         -   **profilePicturePrompt:** Создай промпт для ИИ, генерирующего изображения. Промпт должен быть на английском языке, детализированным, и описывать абстрактную иконку или маскота для аватара Telegram-бота. Пример: "A friendly, minimalist robot mascot waving, vector art, vibrant colors, clean lines, circular background, suitable for a small profile picture".
         -   **description:** Сделай его привлекательным и соответствующим цели и тону бота.
         -   **capabilities:** Будь прямым и ясным. Начинай каждый пункт с глагола действия.
-        -   **customizedScript:** Это самая важная часть. Перепиши весь сценарий (или создай с нуля), а не просто добавляй комментарии. Тон, лексика, структура предложений, использование эмодзи и длина ответов должны идеально отражать ВСЕ выбранные настройки.
+        -   **customizedScript:** Это самая важная часть. Перепиши весь сценарий (или создай с нуля), а не просто добавляй комментарии. Тон, лексика, структура предложений, использование эмодзи и длина ответов должны идеально отражать ВСЕ выбранные настройки. Если выбрана **маркетинговая модель продаж**, убедись, что структура диалога следует ее принципам.
             -   **Форматирование:** Используй Markdown, совместимый с Telegram (*жирный текст* , _курсив_ , __подчеркнутый__), внутри значения ключа \`text\` для улучшения читаемости.
             -   **Структура вывода:** Верни сценарий СТРОГО в формате JSON-массива объектов. Каждый элемент массива — это объект, представляющий одно сообщение от бота. Объект должен иметь ключ \`text\` со строковым значением. Если у сообщения есть кнопки, добавь ключ \`buttons\` с массивом массивов объектов кнопок (формат Telegram Bot API: \`[[{"text": "Button 1", "callback_data": "data1"}]]\`).
         -   **scriptBlocks:** Определи 3-5 основных логических разделов в адаптированном сценарии. **Логический раздел — это группа сообщений, которая заканчивается предложением пользователю совершить действие (например, нажать на кнопки).** 'description' для каждого блока должен быть визуальным промптом на английском языке. Например: "A friendly robot waving hello to a new user, with message bubbles in the background, digital illustration style."
@@ -201,6 +221,7 @@ export const generateBotAssets = async (
     emojiFrequency: string,
     responseLength: string,
     languageComplexity: string,
+    salesFramework: string,
 ): Promise<GeneratedAssets> => {
     
     const textData = await generateTextContent(
@@ -214,6 +235,7 @@ export const generateBotAssets = async (
         emojiFrequency,
         responseLength,
         languageComplexity,
+        salesFramework,
     );
 
     return {
