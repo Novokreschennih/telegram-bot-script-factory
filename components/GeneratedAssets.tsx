@@ -273,6 +273,7 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) =>
   const [showRawCode, setShowRawCode] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState<string>(OUTPUT_FORMATS[0].value);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
+  const [copiedButtonKey, setCopiedButtonKey] = useState<string | null>(null);
 
   const formattedScript = useMemo(() => {
     if (!assets.customizedScript) return '';
@@ -328,6 +329,15 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) =>
     }, 2000);
   };
 
+  const handleCopyButton = (text: string, messageIndex: number, btnIndex: number) => {
+    navigator.clipboard.writeText(text);
+    const key = `${messageIndex}-${btnIndex}`;
+    setCopiedButtonKey(key);
+    setTimeout(() => {
+        setCopiedButtonKey(null);
+    }, 2000);
+  };
+
   return (
     <div className="space-y-12">
       {/* Bot Profile Section */}
@@ -365,7 +375,7 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) =>
             <h2 className="text-3xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">
                 Предпросмотр сценария
             </h2>
-            <p className="text-gray-400 mb-6">Нажмите на любое сообщение, чтобы скопировать его текст с форматированием.</p>
+            <p className="text-gray-400 mb-6">Нажмите на любое сообщение или кнопку, чтобы скопировать их текст.</p>
         </div>
         
         {/* Chat Preview */}
@@ -394,11 +404,24 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) =>
                 </button>
               {node.buttons && node.buttons.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {node.buttons.flat().map((button, btnIndex) => (
-                    <div key={btnIndex} className="bg-gray-700/80 text-gray-300 rounded-full px-4 py-1.5 text-sm cursor-default">
-                      {button.text}
-                    </div>
-                  ))}
+                  {node.buttons.flat().map((button, btnIndex) => {
+                    const buttonKey = `${index}-${btnIndex}`;
+                    const isCopied = copiedButtonKey === buttonKey;
+                    return (
+                        <button
+                            key={btnIndex}
+                            onClick={() => handleCopyButton(button.text, index, btnIndex)}
+                            className={`rounded-full px-4 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-purple-500 ${
+                                isCopied
+                                ? 'bg-green-600 text-white cursor-default'
+                                : 'bg-gray-700/80 text-gray-300 hover:bg-gray-600 cursor-pointer'
+                            }`}
+                            title={`Нажмите, чтобы скопировать: "${button.text}"`}
+                        >
+                            {isCopied ? 'Скопировано!' : button.text}
+                        </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
