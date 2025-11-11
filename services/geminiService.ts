@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import type { GeneratedAssets, TextGenerationResponse } from '../types';
 
 const getAiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY as string });
@@ -209,6 +209,142 @@ const generateTextContent = async (
     // Fallback error, should not be reached if MAX_RETRIES > 0.
     throw new Error('Generation failed after multiple retries.');
 };
+
+export const regenerateSingleMessage = async (
+    settings: {
+        userStory: string;
+        writingStyle: string;
+        targetAudience: string;
+        botGoal: string;
+        formality: string;
+        emojiFrequency: string;
+        responseLength: string;
+        languageComplexity: string;
+        salesFramework: string;
+    },
+    currentGeneratedScript: string, // The full script generated so far, for context
+    messageToRegenerate: string
+): Promise<string> => {
+    const ai = getAiClient();
+    const model = 'gemini-2.5-pro';
+
+    const prompt = `
+        Ты — эксперт по написанию сценариев для чат-ботов. Твоя задача — переписать ОДНО КОНКРЕТНОЕ сообщение в рамках уже существующего диалога, сохраняя общий тон, стиль и контекст.
+        
+        **Контекст:**
+
+        1.  **Общие настройки стиля:**
+            *   Стиль: ${settings.writingStyle}
+            *   Аудитория: ${settings.targetAudience}
+            *   Цель: ${settings.botGoal}
+            *   Формальность: ${settings.formality}
+            *   Эмодзи: ${settings.emojiFrequency}
+            *   Длина ответов: ${settings.responseLength}
+            *   Сложность языка: ${settings.languageComplexity}
+            *   Модель продаж: ${getSalesFrameworkInstruction(settings.salesFramework)}
+            *   История пользователя: ${settings.userStory || 'Нет'}
+
+        2.  **Полный сгенерированный диалог (для понимания контекста):**
+            \`\`\`
+            ${currentGeneratedScript}
+            \`\`\`
+
+        **Задача:**
+
+        Перепиши следующее сообщение, чтобы предложить альтернативный вариант, который соответствует всем указанным выше настройкам и контексту диалога.
+
+        **Сообщение для перегенерации:**
+        \`\`\`
+        ${messageToRegenerate}
+        \`\`\`
+
+        **Требования к ответу:**
+        -   Верни ТОЛЬКО новый текст для этого одного сообщения.
+        -   Не добавляй никаких объяснений, префиксов вроде "Вот новый вариант:" или JSON-форматирования.
+        -   Сохрани Markdown-форматирование, совместимое с Telegram (*жирный*, _курсив_).
+        -   Твой ответ должен быть просто строкой с новым текстом сообщения.
+    `;
+
+    const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+    });
+
+    return response.text.trim();
+};
+
+export const generateImageFromPrompt = async (prompt: string): Promise<string> => {
+    const ai = getAiClient();
+    const model = 'gemini-2.5-flash-image';
+    
+    const requestConfig = {
+        model,
+        contents: { parts: [{ text: prompt }] },
+        config: {
+            responseModalities: [Modality.IMAGE] as Modality[],
+        },
+    };
+
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+
+    while (attempt < MAX_RETRIES) {
+        try {
+            const response = await ai.models.generateContent(requestConfig);
+
+            for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData) {
+                    return part.inlineData.data;
+                }
+            }
+            throw new Error('В ответе не найдены данные изображения.');
+
+        } catch (err: any) {
+            attempt++;
+            const errorMessage = (err.message || '').toLowerCase();
+            console.error(`Image generation failed on attempt ${attempt}.`, err);
+
+            const isRetryable = errorMessage.includes('429') ||
+                                errorMessage.includes('resource_exhausted') ||
+                                errorMessage.includes('overloaded') ||
+                                errorMessage.includes('503') ||
+                                errorMessage.includes('unavailable');
+
+            if (isRetryable && attempt < MAX_RETRIES) {
+                let delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s
+
+                if (err.message) {
+                    try {
+                        const errorJson = JSON.parse(err.message);
+                        const retryInfo = errorJson?.error?.details?.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
+                        if (retryInfo?.retryDelay) {
+                            const seconds = parseInt(retryInfo.retryDelay.replace('s', ''), 10);
+                            if (!isNaN(seconds)) {
+                               delay = (seconds * 1000) + Math.floor(Math.random() * 1000);
+                            }
+                        }
+                    } catch (e) {
+                        // Not a JSON message, stick to exponential backoff
+                    }
+                }
+                
+                console.warn(`Attempt ${attempt} failed with a retryable error. Retrying in ${delay / 1000}s...`);
+                await sleep(delay);
+            } else {
+                if (errorMessage.includes('block') && errorMessage.includes('safety')) {
+                    throw new Error('Запрос на изображение заблокирован из-за настроек безопасности.');
+                }
+                if (isRetryable) {
+                     throw new Error('Вы превысили лимит запросов. Пожалуйста, подождите и попробуйте снова, или проверьте ваш план и биллинг.');
+                }
+                throw err;
+            }
+        }
+    }
+    
+    throw new Error('Не удалось сгенерировать изображение после нескольких попыток.');
+};
+
 
 export const generateBotAssets = async (
     mode: 'customize' | 'create',

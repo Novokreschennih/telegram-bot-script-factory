@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { generateBotAssets } from './services/geminiService';
+import { generateBotAssets, regenerateSingleMessage } from './services/geminiService';
 import type { GeneratedAssets } from './types';
 import { WRITING_STYLES, TARGET_AUDIENCES, BOT_GOALS, FORMALITY_LEVELS, EMOJI_FREQUENCIES, RESPONSE_LENGTHS, LANGUAGE_COMPLEXITIES, SALES_FRAMEWORKS } from './constants';
 import FileUpload from './components/FileUpload';
@@ -16,6 +16,7 @@ import Modal from './components/Modal';
 import InstructionsModal from './components/InstructionsModal';
 import PinValidation from './components/PinValidation';
 import LegalContent from './components/LegalContent';
+import GeneratedAssetsSkeleton from './components/GeneratedAssetsSkeleton';
 
 declare global {
   interface AIStudio {
@@ -79,7 +80,8 @@ const App: React.FC = () => {
   const [salesFramework, setSalesFramework] = useState<string>(SALES_FRAMEWORKS[0].value);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [loadingMessage, setLoadingMessage] = useState<string>('');
+  const [isRegeneratingAll, setIsRegeneratingAll] = useState<boolean>(false);
+  const [regeneratingMessageIndex, setRegeneratingMessageIndex] = useState<number | null>(null);
   const [generatedAssets, setGeneratedAssets] = useState<GeneratedAssets | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -227,7 +229,8 @@ const App: React.FC = () => {
     setIsLoading(true);
     setError(null);
     setGeneratedAssets(null);
-    setLoadingMessage('Создание персонажа, сценария и промптов для изображений...');
+    setRegeneratingMessageIndex(null);
+    setIsRegeneratingAll(false);
 
     try {
       const assets = await generateBotAssets(
@@ -266,9 +269,48 @@ const App: React.FC = () => {
       setError(errorMessage);
     } finally {
       setIsLoading(false);
-      setLoadingMessage('');
     }
   }, [isApiKeySelected, mode, mainInputText, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework]);
+
+  const handleRegenerateAll = useCallback(async () => {
+    setIsRegeneratingAll(true);
+    await handleGenerate();
+    setIsRegeneratingAll(false);
+  }, [handleGenerate]);
+
+  const handleRegenerateSingleMessage = useCallback(async (index: number) => {
+    if (!generatedAssets) return;
+    
+    setRegeneratingMessageIndex(index);
+    setError(null);
+
+    try {
+        const currentScriptForContext = generatedAssets.customizedScript
+            .map(node => node.text)
+            .join('\n---\n');
+        
+        const messageToRegenerate = generatedAssets.customizedScript[index].text;
+
+        const newText = await regenerateSingleMessage(
+            { userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework },
+            currentScriptForContext,
+            messageToRegenerate
+        );
+
+        setGeneratedAssets(prevAssets => {
+            if (!prevAssets) return null;
+            const newScript = [...prevAssets.customizedScript];
+            newScript[index] = { ...newScript[index], text: newText };
+            return { ...prevAssets, customizedScript: newScript };
+        });
+
+    } catch (err) {
+        console.error("Single message regeneration failed:", err);
+        setError("Не удалось перегенерировать сообщение. Попробуйте снова.");
+    } finally {
+        setRegeneratingMessageIndex(null);
+    }
+  }, [generatedAssets, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework]);
 
   const availableResponseLengths = useMemo(() => {
     if (mode === 'customize') {
@@ -472,11 +514,10 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Loading State */}
-            {isLoading && (
-                <div className="text-center mt-10">
-                    <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-purple-400"></div>
-                    <p className="mt-4 text-lg text-gray-300">{loadingMessage}</p>
+            {/* Loading Skeleton */}
+            {isLoading && !generatedAssets && (
+                <div className="mt-12">
+                    <GeneratedAssetsSkeleton />
                 </div>
             )}
 
@@ -491,7 +532,13 @@ const App: React.FC = () => {
             {/* Results Section */}
             {generatedAssets && (
               <div className="mt-12">
-                <GeneratedAssetsComponent assets={generatedAssets} />
+                <GeneratedAssetsComponent 
+                    assets={generatedAssets} 
+                    onRegenerateAll={handleRegenerateAll}
+                    onRegenerateSingleMessage={handleRegenerateSingleMessage}
+                    isRegeneratingAll={isRegeneratingAll}
+                    regeneratingMessageIndex={regeneratingMessageIndex}
+                />
               </div>
             )}
         </>

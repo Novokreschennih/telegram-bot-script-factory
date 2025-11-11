@@ -5,9 +5,17 @@ import { OUTPUT_FORMATS } from '../constants';
 import { CopyIcon } from './icons/CopyIcon';
 import { CheckIcon } from './icons/CheckIcon';
 import { DownloadIcon } from './icons/DownloadIcon';
+import { RefreshIcon } from './icons/RefreshIcon';
+import { WandIcon } from './icons/WandIcon';
+import LoadingSpinner from './LoadingSpinner';
+import ImageGenerationCard from './ImageGenerationCard';
 
 interface GeneratedAssetsProps {
   assets: GeneratedAssets;
+  onRegenerateAll: () => void;
+  onRegenerateSingleMessage: (index: number) => void;
+  isRegeneratingAll: boolean;
+  regeneratingMessageIndex: number | null;
 }
 
 const scriptToMarkdown = (script: ScriptNode[]): string => {
@@ -268,7 +276,13 @@ const PromptCard: React.FC<{ title: string; prompt: string; className?: string }
   );
 };
 
-const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) => {
+const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ 
+    assets,
+    onRegenerateAll,
+    onRegenerateSingleMessage,
+    isRegeneratingAll,
+    regeneratingMessageIndex
+}) => {
   const [scriptCopied, setScriptCopied] = useState(false);
   const [showRawCode, setShowRawCode] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState<string>(OUTPUT_FORMATS[0].value);
@@ -339,7 +353,7 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) =>
   };
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-12 animate-fadeIn">
       {/* Bot Profile Section */}
       <section className="bg-gray-800/50 rounded-2xl p-6 md:p-8">
         <h2 className="text-3xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500">
@@ -371,61 +385,85 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) =>
 
       {/* Customized Script Section */}
       <section className="bg-gray-800/50 rounded-2xl p-6 md:p-8">
-        <div className="text-center">
-            <h2 className="text-3xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">
-                Предпросмотр сценария
-            </h2>
-            <p className="text-gray-400 mb-6">Нажмите на любое сообщение или кнопку, чтобы скопировать их текст.</p>
+        <div className="flex flex-col md:flex-row justify-between items-center text-center gap-4 mb-6">
+            <div className="flex-grow">
+                <h2 className="text-3xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">
+                    Предпросмотр сценария
+                </h2>
+                <p className="text-gray-400">Нажмите на иконки, чтобы скопировать текст или перегенерировать сообщение.</p>
+            </div>
+            <button 
+                onClick={onRegenerateAll}
+                disabled={isRegeneratingAll || regeneratingMessageIndex !== null}
+                className="flex items-center gap-2 bg-gray-700 text-gray-300 hover:bg-purple-600 hover:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed md:ml-auto"
+            >
+                {isRegeneratingAll ? <LoadingSpinner /> : <RefreshIcon />}
+                <span>{isRegeneratingAll ? 'Обновляем...' : 'Перегенерировать всё'}</span>
+            </button>
         </div>
         
         {/* Chat Preview */}
         <div className="bg-gray-900/70 rounded-lg p-4 space-y-4 max-h-[600px] overflow-y-auto mb-6">
-          {assets.customizedScript.map((node, index) => (
-            <div key={index} className="flex flex-col items-start group relative">
-                <button
-                    onClick={() => handleCopyMessage(node.text, index)}
-                    className="w-full text-left bg-purple-900/40 rounded-lg rounded-tl-none p-3 max-w-xl hover:bg-purple-900/60 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    aria-label="Скопировать сообщение"
-                >
-                    <p className="text-gray-200 whitespace-pre-wrap">{parseTelegramMarkdown(node.text)}</p>
-                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                        {copiedMessageIndex === index ? (
-                            <span className="flex items-center gap-1 text-xs bg-green-800/80 text-green-300 px-2 py-1 rounded-md">
-                            <CheckIcon />
-                            Скопировано
-                            </span>
-                        ) : (
-                            <span className="flex items-center gap-1 text-xs bg-gray-700/80 text-gray-300 px-2 py-1 rounded-md">
-                            <CopyIcon />
-                            Копировать
-                            </span>
-                        )}
-                    </div>
-                </button>
-              {node.buttons && node.buttons.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {node.buttons.flat().map((button, btnIndex) => {
-                    const buttonKey = `${index}-${btnIndex}`;
-                    const isCopied = copiedButtonKey === buttonKey;
-                    return (
-                        <button
-                            key={btnIndex}
-                            onClick={() => handleCopyButton(button.text, index, btnIndex)}
-                            className={`rounded-full px-4 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-purple-500 ${
-                                isCopied
-                                ? 'bg-green-600 text-white cursor-default'
-                                : 'bg-gray-700/80 text-gray-300 hover:bg-gray-600 cursor-pointer'
-                            }`}
-                            title={`Нажмите, чтобы скопировать: "${button.text}"`}
-                        >
-                            {isCopied ? 'Скопировано!' : button.text}
-                        </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
+          {assets.customizedScript.map((node, index) => {
+            const isRegeneratingThisMessage = regeneratingMessageIndex === index;
+            const isAnyMessageRegenerating = regeneratingMessageIndex !== null;
+
+            return (
+              <div key={index} className="flex flex-col items-start group relative">
+                  <div className={`w-full text-left bg-purple-900/40 rounded-lg rounded-tl-none p-3 max-w-xl transition-all duration-300 ${isAnyMessageRegenerating && !isRegeneratingThisMessage ? 'opacity-50 blur-sm' : ''}`}>
+                      {isRegeneratingThisMessage ? (
+                          <div className="flex items-center justify-center h-10">
+                              <LoadingSpinner />
+                          </div>
+                      ) : (
+                          <>
+                              <p className="text-gray-200 whitespace-pre-wrap">{parseTelegramMarkdown(node.text)}</p>
+                              <div className="absolute top-1 right-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                  <button 
+                                      onClick={() => onRegenerateSingleMessage(index)}
+                                      disabled={isAnyMessageRegenerating || isRegeneratingAll}
+                                      className="p-1.5 bg-gray-700/80 text-purple-300 rounded-full hover:bg-purple-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                                      title="Перегенерировать это сообщение"
+                                  >
+                                      <WandIcon />
+                                  </button>
+                                  <button
+                                      onClick={() => handleCopyMessage(node.text, index)}
+                                      className="p-1.5 bg-gray-700/80 text-gray-300 rounded-full hover:bg-gray-600"
+                                      title="Копировать сообщение"
+                                  >
+                                      {copiedMessageIndex === index ? <CheckIcon /> : <CopyIcon />}
+                                  </button>
+                              </div>
+                          </>
+                      )}
+                  </div>
+                {node.buttons && node.buttons.length > 0 && (
+                  <div className={`mt-2 flex flex-wrap gap-2 transition-opacity duration-300 ${isAnyMessageRegenerating || isRegeneratingAll ? 'opacity-50' : ''}`}>
+                    {node.buttons.flat().map((button, btnIndex) => {
+                      const buttonKey = `${index}-${btnIndex}`;
+                      const isCopied = copiedButtonKey === buttonKey;
+                      return (
+                          <button
+                              key={btnIndex}
+                              onClick={() => handleCopyButton(button.text, index, btnIndex)}
+                              disabled={isAnyMessageRegenerating || isRegeneratingAll}
+                              className={`rounded-full px-4 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-purple-500 disabled:cursor-not-allowed ${
+                                  isCopied
+                                  ? 'bg-green-600 text-white cursor-default'
+                                  : 'bg-gray-700/80 text-gray-300 hover:bg-gray-600 cursor-pointer'
+                              }`}
+                              title={`Нажмите, чтобы скопировать: "${button.text}"`}
+                          >
+                              {isCopied ? 'Скопировано!' : button.text}
+                          </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Export and Code View Controls */}
@@ -490,11 +528,14 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({ assets }) =>
       {/* Script Visuals Section */}
       <section className="bg-gray-800/50 rounded-2xl p-6 md:p-8">
         <h2 className="text-3xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
-          Промпты для визуализации сценария
+          Визуализация сценария
         </h2>
+        <p className="text-center text-gray-400 -mt-4 mb-8 max-w-2xl mx-auto">
+            Создайте иллюстрации для ключевых моментов вашего сценария. Генерация может занять до 30 секунд.
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
           {assets.scriptBlockPrompts.map((prompt, index) => (
-            <PromptCard 
+            <ImageGenerationCard
               key={index} 
               title={prompt.blockTitle}
               prompt={prompt.imagePrompt}
