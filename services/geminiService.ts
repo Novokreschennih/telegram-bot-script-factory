@@ -40,9 +40,10 @@ const generateTextContent = async (
     languageComplexity: string,
     salesFramework: string,
     apiKey: string,
+    modelName: string,
 ): Promise<TextGenerationResponse> => {
     const ai = getAiClient(apiKey);
-    const model = 'gemini-2.5-pro';
+    const model = modelName;
     
     const coreTaskInstruction = mode === 'customize' 
     ? `
@@ -231,9 +232,10 @@ export const regenerateSingleMessage = async (
     currentGeneratedScript: string, // The full script generated so far, for context
     messageToRegenerate: string,
     apiKey: string,
+    modelName: string,
 ): Promise<string> => {
     const ai = getAiClient(apiKey);
-    const model = 'gemini-2.5-pro';
+    const model = modelName;
 
     const prompt = `
         Ты — эксперт по написанию сценариев для чат-ботов. Твоя задача — переписать ОДНО КОНКРЕТНОЕ сообщение в рамках уже существующего диалога, сохраняя общий тон, стиль и контекст.
@@ -366,6 +368,7 @@ export const generateBotAssets = async (
     languageComplexity: string,
     salesFramework: string,
     apiKey: string,
+    model: string,
 ): Promise<GeneratedAssets> => {
     
     const textData = await generateTextContent(
@@ -380,7 +383,8 @@ export const generateBotAssets = async (
         responseLength,
         languageComplexity,
         salesFramework,
-        apiKey
+        apiKey,
+        model
     );
 
     return {

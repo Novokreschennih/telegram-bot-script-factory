@@ -71,3 +71,8 @@ export const OUTPUT_FORMATS = [
   { value: 'JSON', label: 'JSON' },
   { value: 'Text', label: 'Обычный текст (.txt)' },
 ];
+
+export const AI_MODELS = [
+  { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Быстрый)' },
+  { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Мощный)' },
+];

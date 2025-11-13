@@ -1,8 +1,8 @@
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { generateBotAssets, regenerateSingleMessage } from './services/geminiService';
 import type { GeneratedAssets } from './types';
-import { WRITING_STYLES, TARGET_AUDIENCES, BOT_GOALS, FORMALITY_LEVELS, EMOJI_FREQUENCIES, RESPONSE_LENGTHS, LANGUAGE_COMPLEXITIES, SALES_FRAMEWORKS } from './constants';
+import { WRITING_STYLES, TARGET_AUDIENCES, BOT_GOALS, FORMALITY_LEVELS, EMOJI_FREQUENCIES, RESPONSE_LENGTHS, LANGUAGE_COMPLEXITIES, SALES_FRAMEWORKS, AI_MODELS } from './constants';
 import FileUpload from './components/FileUpload';
 import TextAreaInput from './components/TextAreaInput';
 import SelectInput from './components/SelectInput';
@@ -17,6 +17,7 @@ import PinValidation from './components/PinValidation';
 import LegalContent from './components/LegalContent';
 import GeneratedAssetsSkeleton from './components/GeneratedAssetsSkeleton';
 import ApiKeyModal from './components/ApiKeyModal';
+import { ChevronUpIcon } from './components/icons/ChevronUpIcon';
 
 const APP_STATE_STORAGE_KEY = 'botCustomizerState';
 const AUTH_STATUS_KEY = 'isAuthenticated';
@@ -38,6 +39,7 @@ interface AppState {
     languageComplexity: string;
     salesFramework: string;
     mode: AppMode;
+    model: string;
 }
 
 const getInitialView = (): AppView => {
@@ -53,6 +55,9 @@ const App: React.FC = () => {
   const [isInstructionsModalOpen, setInstructionsModalOpen] = useState(false);
   const [isPolicyModalOpen, setPolicyModalOpen] = useState(false);
   const [isApiKeyModalOpen, setApiKeyModalOpen] = useState(false);
+  const [isSettingsPanelCollapsed, setIsSettingsPanelCollapsed] = useState(false);
+  
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   const [mode, setMode] = useState<AppMode>('customize');
   const [mainInputText, setMainInputText] = useState<string>('');
@@ -66,6 +71,7 @@ const App: React.FC = () => {
   const [responseLength, setResponseLength] = useState<string>(RESPONSE_LENGTHS[0].value);
   const [languageComplexity, setLanguageComplexity] = useState<string>(LANGUAGE_COMPLEXITIES[0].value);
   const [salesFramework, setSalesFramework] = useState<string>(SALES_FRAMEWORKS[0].value);
+  const [model, setModel] = useState<string>(AI_MODELS[0].value);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRegeneratingAll, setIsRegeneratingAll] = useState<boolean>(false);
@@ -92,6 +98,7 @@ const App: React.FC = () => {
         setLanguageComplexity(savedState.languageComplexity || LANGUAGE_COMPLEXITIES[0].value);
         setSalesFramework(savedState.salesFramework || SALES_FRAMEWORKS[0].value);
         setMode(savedState.mode || 'customize');
+        setModel(savedState.model || AI_MODELS[0].value);
       }
       const savedApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
       if (savedApiKey) {
@@ -108,6 +115,16 @@ const App: React.FC = () => {
       setApiKeyModalOpen(true);
     }
   }, [view, apiKey]);
+  
+  // Auto-scroll to results when they are generated
+  useEffect(() => {
+    if (generatedAssets && resultsRef.current) {
+        setTimeout(() => {
+            resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 300);
+    }
+  }, [generatedAssets]);
+
 
   // Save state to localStorage whenever it changes
   useEffect(() => {
@@ -124,11 +141,12 @@ const App: React.FC = () => {
       languageComplexity,
       salesFramework,
       mode,
+      model,
     };
     localStorage.setItem(APP_STATE_STORAGE_KEY, JSON.stringify(appState));
   }, [
     mainInputText, fileName, userStory, writingStyle, targetAudience,
-    botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework, mode
+    botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework, mode, model
   ]);
 
   const handleSaveApiKey = (newKey: string) => {
@@ -227,9 +245,11 @@ const App: React.FC = () => {
         responseLength,
         languageComplexity,
         salesFramework,
-        apiKey
+        apiKey,
+        model
       );
       setGeneratedAssets(assets);
+      setIsSettingsPanelCollapsed(true);
     } catch (err) {
       console.error("Generation failed:", err);
       let errorMessage = 'Произошла неизвестная ошибка. Пожалуйста, попробуйте еще раз или проверьте консоль разработчика для получения дополнительной информации.';
@@ -252,7 +272,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [mode, mainInputText, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework, apiKey]);
+  }, [mode, mainInputText, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework, apiKey, model]);
 
   const handleRegenerateAll = useCallback(async () => {
     setIsRegeneratingAll(true);
@@ -277,7 +297,8 @@ const App: React.FC = () => {
             { userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework },
             currentScriptForContext,
             messageToRegenerate,
-            apiKey
+            apiKey,
+            model
         );
 
         setGeneratedAssets(prevAssets => {
@@ -293,7 +314,7 @@ const App: React.FC = () => {
     } finally {
         setRegeneratingMessageIndex(null);
     }
-  }, [generatedAssets, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework, apiKey]);
+  }, [generatedAssets, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework, apiKey, model]);
 
   const availableResponseLengths = useMemo(() => {
     if (mode === 'customize') {
@@ -352,136 +373,157 @@ const App: React.FC = () => {
               </p>
             </header>
             
-            <div className="max-w-4xl mx-auto bg-gray-800/50 rounded-2xl shadow-2xl shadow-purple-500/10 p-6 md:p-8 space-y-8">
-              
-              <div className="flex justify-center border-b border-gray-700">
-                <button 
-                  onClick={() => handleModeChange('customize')}
-                  className={`px-6 py-3 text-lg font-medium transition-colors duration-300 ${mode === 'customize' ? 'border-b-2 border-purple-400 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+            <div className="max-w-4xl mx-auto bg-gray-800/50 rounded-2xl shadow-2xl shadow-purple-500/10 overflow-hidden transition-all duration-500">
+                <div
+                    className="p-6 md:p-8 flex justify-between items-center cursor-pointer hover:bg-gray-800/30"
+                    onClick={() => setIsSettingsPanelCollapsed(!isSettingsPanelCollapsed)}
+                    aria-expanded={!isSettingsPanelCollapsed}
+                    aria-controls="settings-panel-content"
                 >
-                  Кастомизация
-                </button>
-                <button 
-                  onClick={() => handleModeChange('create')}
-                  className={`px-6 py-3 text-lg font-medium transition-colors duration-300 ${mode === 'create' ? 'border-b-2 border-purple-400 text-white' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                  Создание с нуля
-                </button>
-              </div>
-
-              {/* Inputs Section */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-6">
-                   {mode === 'customize' ? (
-                     <>
-                       <FileUpload onFileChange={handleFileChange} fileName={fileName} label="Загрузите референсный сценарий" />
-                       <TextAreaInput
-                        id="user-story"
-                        label="Добавьте вашу историю (необязательно)"
-                        placeholder="Например, наша компания продает экологически чистые кофейные зерна..."
-                        value={userStory}
-                        onChange={(e) => setUserStory(e.target.value)}
-                        rows={5}
-                      />
-                     </>
-                   ) : (
-                     <>
-                       <TextAreaInput
-                        id="bot-idea"
-                        label="Опишите идею вашего бота"
-                        placeholder="Например: бот для кофейни, который принимает заказы, рассказывает о сортах кофе и проводит викторины..."
-                        value={mainInputText}
-                        onChange={(e) => setMainInputText(e.target.value)}
-                        rows={8}
-                      />
-                       <FileUpload onFileChange={handleFileChange} fileName={fileName} label="Загрузите доп. материалы (необязательно)" />
-                     </>
-                   )}
+                    <h2 className="text-2xl font-bold text-white">Шаг 1: Настройка и Вводные</h2>
+                    <ChevronUpIcon className={`w-6 h-6 transform transition-transform duration-300 ${isSettingsPanelCollapsed ? 'rotate-180' : ''}`} />
                 </div>
-                <div className="space-y-4">
-                    <h3 className="text-xl font-semibold text-white mb-4">Настройте голос вашего бота</h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <SelectInput 
-                            id="writing-style"
-                            label="Стиль написания"
-                            value={writingStyle}
-                            onChange={(e) => setWritingStyle(e.target.value)}
-                            options={WRITING_STYLES}
-                        />
-                        <SelectInput 
-                            id="target-audience"
-                            label="Целевая аудитория"
-                            value={targetAudience}
-                            onChange={(e) => setTargetAudience(e.target.value)}
-                            options={TARGET_AUDIENCES}
-                        />
-                        <SelectInput 
-                            id="bot-goal"
-                            label="Основная цель"
-                            value={botGoal}
-                            onChange={(e) => setBotGoal(e.target.value)}
-                            options={BOT_GOALS}
-                        />
-                        <SelectInput 
-                            id="sales-framework"
-                            label="Модель продаж"
-                            value={salesFramework}
-                            onChange={(e) => setSalesFramework(e.target.value)}
-                            options={SALES_FRAMEWORKS}
-                        />
-                         <SelectInput 
-                            id="formality"
-                            label="Формальность"
-                            value={formality}
-                            onChange={(e) => setFormality(e.target.value)}
-                            options={FORMALITY_LEVELS}
-                        />
-                         <SelectInput 
-                            id="emoji-frequency"
-                            label="Частота эмодзи"
-                            value={emojiFrequency}
-                            onChange={(e) => setEmojiFrequency(e.target.value)}
-                            options={EMOJI_FREQUENCIES}
-                        />
-                         <SelectInput 
-                            id="response-length"
-                            label="Длина ответов"
-                            value={responseLength}
-                            onChange={(e) => setResponseLength(e.target.value)}
-                            options={availableResponseLengths}
-                        />
-                         <SelectInput 
-                            id="language-complexity"
-                            label="Сложность языка"
-                            value={languageComplexity}
-                            onChange={(e) => setLanguageComplexity(e.target.value)}
-                            options={LANGUAGE_COMPLEXITIES}
-                        />
+                <div
+                    id="settings-panel-content"
+                    className={`transition-all duration-500 ease-in-out ${isSettingsPanelCollapsed ? 'max-h-0 opacity-0' : 'max-h-[2000px] opacity-100'}`}
+                    style={{ overflow: 'hidden' }}
+                >
+                    <div className="p-6 md:p-8 pt-0 space-y-8">
+                        <div className="flex justify-center border-b border-gray-700">
+                            <button 
+                              onClick={() => handleModeChange('customize')}
+                              className={`px-6 py-3 text-lg font-medium transition-colors duration-300 ${mode === 'customize' ? 'border-b-2 border-purple-400 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                            >
+                              Кастомизация
+                            </button>
+                            <button 
+                              onClick={() => handleModeChange('create')}
+                              className={`px-6 py-3 text-lg font-medium transition-colors duration-300 ${mode === 'create' ? 'border-b-2 border-purple-400 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                            >
+                              Создание с нуля
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div className="space-y-6">
+                               {mode === 'customize' ? (
+                                 <>
+                                   <FileUpload onFileChange={handleFileChange} fileName={fileName} label="Загрузите референсный сценарий" />
+                                   <TextAreaInput
+                                    id="user-story"
+                                    label="Добавьте вашу историю (необязательно)"
+                                    placeholder="Например, наша компания продает экологически чистые кофейные зерна..."
+                                    value={userStory}
+                                    onChange={(e) => setUserStory(e.target.value)}
+                                    rows={5}
+                                  />
+                                 </>
+                               ) : (
+                                 <>
+                                   <TextAreaInput
+                                    id="bot-idea"
+                                    label="Опишите идею вашего бота"
+                                    placeholder="Например: бот для кофейни, который принимает заказы, рассказывает о сортах кофе и проводит викторины..."
+                                    value={mainInputText}
+                                    onChange={(e) => setMainInputText(e.target.value)}
+                                    rows={8}
+                                  />
+                                   <FileUpload onFileChange={handleFileChange} fileName={fileName} label="Загрузите доп. материалы (необязательно)" />
+                                 </>
+                               )}
+                            </div>
+                            <div className="space-y-4">
+                                <h3 className="text-xl font-semibold text-white mb-4">Настройте голос вашего бота</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <SelectInput 
+                                        id="model-selection"
+                                        label="Модель ИИ"
+                                        value={model}
+                                        onChange={(e) => setModel(e.target.value)}
+                                        options={AI_MODELS}
+                                    />
+                                    <SelectInput 
+                                        id="writing-style"
+                                        label="Стиль написания"
+                                        value={writingStyle}
+                                        onChange={(e) => setWritingStyle(e.target.value)}
+                                        options={WRITING_STYLES}
+                                    />
+                                    <SelectInput 
+                                        id="target-audience"
+                                        label="Целевая аудитория"
+                                        value={targetAudience}
+                                        onChange={(e) => setTargetAudience(e.target.value)}
+                                        options={TARGET_AUDIENCES}
+                                    />
+                                    <SelectInput 
+                                        id="bot-goal"
+                                        label="Основная цель"
+                                        value={botGoal}
+                                        onChange={(e) => setBotGoal(e.target.value)}
+                                        options={BOT_GOALS}
+                                    />
+                                    <SelectInput 
+                                        id="sales-framework"
+                                        label="Модель продаж"
+                                        value={salesFramework}
+                                        onChange={(e) => setSalesFramework(e.target.value)}
+                                        options={SALES_FRAMEWORKS}
+                                    />
+                                     <SelectInput 
+                                        id="formality"
+                                        label="Формальность"
+                                        value={formality}
+                                        onChange={(e) => setFormality(e.target.value)}
+                                        options={FORMALITY_LEVELS}
+                                    />
+                                     <SelectInput 
+                                        id="emoji-frequency"
+                                        label="Частота эмодзи"
+                                        value={emojiFrequency}
+                                        onChange={(e) => setEmojiFrequency(e.target.value)}
+                                        options={EMOJI_FREQUENCIES}
+                                    />
+                                     <SelectInput 
+                                        id="response-length"
+                                        label="Длина ответов"
+                                        value={responseLength}
+                                        onChange={(e) => setResponseLength(e.target.value)}
+                                        options={availableResponseLengths}
+                                    />
+                                     <SelectInput 
+                                        id="language-complexity"
+                                        label="Сложность языка"
+                                        value={languageComplexity}
+                                        onChange={(e) => setLanguageComplexity(e.target.value)}
+                                        options={LANGUAGE_COMPLEXITIES}
+                                    />
+                                </div>
+                            </div>
+                          </div>
+                          
+                          {/* Action Button */}
+                          <div className="pt-4 border-t border-gray-700 space-y-4">
+                             <button
+                              onClick={handleGenerate}
+                              disabled={isLoading || !mainInputText}
+                              title={generateButtonTooltip}
+                              className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-purple-500/50 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 disabled:shadow-none"
+                            >
+                              {isLoading ? (
+                                <>
+                                  <LoadingSpinner />
+                                  <span>Генерация...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <MagicIcon />
+                                  <span>Сгенерировать</span>
+                                </>
+                              )}
+                            </button>
+                        </div>
                     </div>
                 </div>
-              </div>
-              
-              {/* Action Button */}
-              <div className="pt-4 border-t border-gray-700 space-y-4">
-                 <button
-                  onClick={handleGenerate}
-                  disabled={isLoading || !mainInputText}
-                  title={generateButtonTooltip}
-                  className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-purple-500/50 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 disabled:shadow-none"
-                >
-                  {isLoading ? (
-                    <>
-                      <LoadingSpinner />
-                      <span>Генерация...</span>
-                    </>
-                  ) : (
-                    <>
-                      <MagicIcon />
-                      <span>Сгенерировать</span>
-                    </>
-                  )}
-                </button>
-              </div>
             </div>
 
             {/* Loading Skeleton */}
@@ -501,7 +543,7 @@ const App: React.FC = () => {
 
             {/* Results Section */}
             {generatedAssets && (
-              <div className="mt-12">
+              <div ref={resultsRef} className="mt-12">
                 <GeneratedAssetsComponent 
                     assets={generatedAssets} 
                     onRegenerateAll={handleRegenerateAll}
