@@ -2,7 +2,12 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import type { GeneratedAssets, TextGenerationResponse } from '../types';
 
-const getAiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+const getAiClient = (apiKey: string) => {
+    if (!apiKey) {
+        throw new Error('API key is not configured.');
+    }
+    return new GoogleGenAI({ apiKey });
+};
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -34,8 +39,9 @@ const generateTextContent = async (
     responseLength: string,
     languageComplexity: string,
     salesFramework: string,
+    apiKey: string,
 ): Promise<TextGenerationResponse> => {
-    const ai = getAiClient();
+    const ai = getAiClient(apiKey);
     const model = 'gemini-2.5-pro';
     
     const coreTaskInstruction = mode === 'customize' 
@@ -223,9 +229,10 @@ export const regenerateSingleMessage = async (
         salesFramework: string;
     },
     currentGeneratedScript: string, // The full script generated so far, for context
-    messageToRegenerate: string
+    messageToRegenerate: string,
+    apiKey: string,
 ): Promise<string> => {
-    const ai = getAiClient();
+    const ai = getAiClient(apiKey);
     const model = 'gemini-2.5-pro';
 
     const prompt = `
@@ -273,8 +280,8 @@ export const regenerateSingleMessage = async (
     return response.text.trim();
 };
 
-export const generateImageFromPrompt = async (prompt: string): Promise<string> => {
-    const ai = getAiClient();
+export const generateImageFromPrompt = async (prompt: string, apiKey: string): Promise<string> => {
+    const ai = getAiClient(apiKey);
     const model = 'gemini-2.5-flash-image';
     
     const requestConfig = {
@@ -358,6 +365,7 @@ export const generateBotAssets = async (
     responseLength: string,
     languageComplexity: string,
     salesFramework: string,
+    apiKey: string,
 ): Promise<GeneratedAssets> => {
     
     const textData = await generateTextContent(
@@ -372,6 +380,7 @@ export const generateBotAssets = async (
         responseLength,
         languageComplexity,
         salesFramework,
+        apiKey
     );
 
     return {

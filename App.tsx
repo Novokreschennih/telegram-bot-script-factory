@@ -8,7 +8,6 @@ import TextAreaInput from './components/TextAreaInput';
 import SelectInput from './components/SelectInput';
 import GeneratedAssetsComponent from './components/GeneratedAssets';
 import LoadingSpinner from './components/LoadingSpinner';
-import ApiKeySelector from './components/ApiKeySelector';
 import { MagicIcon } from './components/icons/MagicIcon';
 import LandingPage from './components/LandingPage';
 import FloatingIcons from './components/FloatingIcons';
@@ -17,21 +16,11 @@ import InstructionsModal from './components/InstructionsModal';
 import PinValidation from './components/PinValidation';
 import LegalContent from './components/LegalContent';
 import GeneratedAssetsSkeleton from './components/GeneratedAssetsSkeleton';
-
-declare global {
-  interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    openSelectKey: () => Promise<void>;
-  }
-
-  interface Window {
-    aistudio?: AIStudio;
-  }
-}
+import ApiKeyModal from './components/ApiKeyModal';
 
 const APP_STATE_STORAGE_KEY = 'botCustomizerState';
-const API_KEY_SELECTED_FLAG = 'apiKeySelected';
 const AUTH_STATUS_KEY = 'isAuthenticated';
+const API_KEY_STORAGE_KEY = 'botCustomizerApiKey';
 
 type AppMode = 'customize' | 'create';
 type AppView = 'landing' | 'pin' | 'app';
@@ -63,9 +52,8 @@ const App: React.FC = () => {
   const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
   const [isInstructionsModalOpen, setInstructionsModalOpen] = useState(false);
   const [isPolicyModalOpen, setPolicyModalOpen] = useState(false);
+  const [isApiKeyModalOpen, setApiKeyModalOpen] = useState(false);
 
-  const [isApiKeySelected, setIsApiKeySelected] = useState<boolean>(false);
-  
   const [mode, setMode] = useState<AppMode>('customize');
   const [mainInputText, setMainInputText] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
@@ -84,6 +72,7 @@ const App: React.FC = () => {
   const [regeneratingMessageIndex, setRegeneratingMessageIndex] = useState<number | null>(null);
   const [generatedAssets, setGeneratedAssets] = useState<GeneratedAssets | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState<string>('');
 
   // Load state from localStorage on initial render
   useEffect(() => {
@@ -104,10 +93,21 @@ const App: React.FC = () => {
         setSalesFramework(savedState.salesFramework || SALES_FRAMEWORKS[0].value);
         setMode(savedState.mode || 'customize');
       }
+      const savedApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+      if (savedApiKey) {
+        setApiKey(savedApiKey);
+      }
     } catch (e) {
       console.error("Failed to parse state from localStorage", e);
     }
   }, []);
+
+  // Show API Key modal if not set when entering app view
+  useEffect(() => {
+    if (view === 'app' && !apiKey) {
+      setApiKeyModalOpen(true);
+    }
+  }, [view, apiKey]);
 
   // Save state to localStorage whenever it changes
   useEffect(() => {
@@ -131,24 +131,15 @@ const App: React.FC = () => {
     botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework, mode
   ]);
 
+  const handleSaveApiKey = (newKey: string) => {
+    if (newKey) {
+        setApiKey(newKey.trim());
+        localStorage.setItem(API_KEY_STORAGE_KEY, newKey.trim());
+        setApiKeyModalOpen(false);
+        setError(null); // Clear previous API key errors
+    }
+  };
 
-  useEffect(() => {
-    const checkApiKey = async () => {
-      if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        setIsApiKeySelected(hasKey);
-        if (hasKey) {
-          localStorage.setItem(API_KEY_SELECTED_FLAG, 'true');
-        } else {
-          localStorage.removeItem(API_KEY_SELECTED_FLAG);
-        }
-      } else if (localStorage.getItem(API_KEY_SELECTED_FLAG)) {
-        setIsApiKeySelected(true);
-      }
-    };
-    checkApiKey();
-  }, []);
-  
   const handleModeChange = (newMode: AppMode) => {
     if (mode === newMode) return;
 
@@ -161,15 +152,6 @@ const App: React.FC = () => {
     setGeneratedAssets(null);
   };
 
-  const handleSelectKey = async () => {
-    if (window.aistudio?.openSelectKey) {
-      await window.aistudio.openSelectKey();
-      setIsApiKeySelected(true);
-      localStorage.setItem(API_KEY_SELECTED_FLAG, 'true');
-      setSettingsModalOpen(false); // Close modal on success
-    }
-  };
-  
   const processFileContent = (file: File, text: string) => {
     setFileName(file.name);
     if (mode === 'customize' && file.name.endsWith('.json')) {
@@ -217,10 +199,10 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = useCallback(async () => {
-    if (!isApiKeySelected) {
-      setError("Пожалуйста, выберите API-ключ в настройках, чтобы начать генерацию.");
-      setSettingsModalOpen(true);
-      return;
+    if (!apiKey) {
+        setError("API-ключ не настроен. Пожалуйста, добавьте его в настройках.");
+        setApiKeyModalOpen(true);
+        return;
     }
     if (!mainInputText) {
       setError(mode === 'customize' ? 'Пожалуйста, сначала загрузите референсный сценарий.' : 'Пожалуйста, опишите идею вашего бота.');
@@ -244,7 +226,8 @@ const App: React.FC = () => {
         emojiFrequency,
         responseLength,
         languageComplexity,
-        salesFramework
+        salesFramework,
+        apiKey
       );
       setGeneratedAssets(assets);
     } catch (err) {
@@ -252,15 +235,14 @@ const App: React.FC = () => {
       let errorMessage = 'Произошла неизвестная ошибка. Пожалуйста, попробуйте еще раз или проверьте консоль разработчика для получения дополнительной информации.';
        
       if (err instanceof Error) {
-        if (err.message.includes('Requested entity was not found.')) {
-            errorMessage = 'Ваш API-ключ недействителен или не имеет доступа к необходимым моделям. Пожалуйста, выберите другой ключ и попробуйте снова.';
-            setIsApiKeySelected(false);
-            localStorage.removeItem(API_KEY_SELECTED_FLAG);
-        } else if (err.message.includes('The model is overloaded') || err.message.includes('UNAVAILABLE')) {
+        const lowerCaseError = err.message.toLowerCase();
+        if (lowerCaseError.includes('api key') || lowerCaseError.includes('requested entity was not found') || lowerCaseError.includes('permission denied')) {
+            errorMessage = 'Ваш API-ключ недействителен, отсутствует или не имеет доступа к моделям. Пожалуйста, проверьте его в настройках.';
+        } else if (lowerCaseError.includes('the model is overloaded') || lowerCaseError.includes('unavailable')) {
             errorMessage = 'Модель искусственного интеллекта в данный момент перегружена из-за высокого спроса. Пожалуйста, подождите немного и попробуйте снова.';
-        } else if (err instanceof SyntaxError || err.message.toLowerCase().includes('json')) {
+        } else if (err instanceof SyntaxError || lowerCaseError.includes('json')) {
             errorMessage = 'Ошибка обработки ответа ИИ. Модель вернула данные в неверном формате. Это может произойти со сложными сценариями. Попробуйте упростить запрос или изменить настройки.';
-        } else if (err.message.toLowerCase().includes('block') && err.message.toLowerCase().includes('safety')) {
+        } else if (lowerCaseError.includes('block') && lowerCaseError.includes('safety')) {
              errorMessage = 'Ответ был заблокирован из-за настроек безопасности. Пожалуйста, измените свой запрос.';
         } else {
             errorMessage = `Произошла ошибка: ${err.message}`;
@@ -270,7 +252,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [isApiKeySelected, mode, mainInputText, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework]);
+  }, [mode, mainInputText, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework, apiKey]);
 
   const handleRegenerateAll = useCallback(async () => {
     setIsRegeneratingAll(true);
@@ -279,7 +261,7 @@ const App: React.FC = () => {
   }, [handleGenerate]);
 
   const handleRegenerateSingleMessage = useCallback(async (index: number) => {
-    if (!generatedAssets) return;
+    if (!generatedAssets || !apiKey) return;
     
     setRegeneratingMessageIndex(index);
     setError(null);
@@ -294,7 +276,8 @@ const App: React.FC = () => {
         const newText = await regenerateSingleMessage(
             { userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework },
             currentScriptForContext,
-            messageToRegenerate
+            messageToRegenerate,
+            apiKey
         );
 
         setGeneratedAssets(prevAssets => {
@@ -310,7 +293,7 @@ const App: React.FC = () => {
     } finally {
         setRegeneratingMessageIndex(null);
     }
-  }, [generatedAssets, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework]);
+  }, [generatedAssets, userStory, writingStyle, targetAudience, botGoal, formality, emojiFrequency, responseLength, languageComplexity, salesFramework, apiKey]);
 
   const availableResponseLengths = useMemo(() => {
     if (mode === 'customize') {
@@ -327,11 +310,9 @@ const App: React.FC = () => {
     }
   }, [mode]);
   
-  const generateButtonTooltip = !isApiKeySelected 
-    ? "Пожалуйста, выберите API-ключ в настройках" 
-    : !mainInputText 
-      ? (mode === 'customize' ? 'Пожалуйста, загрузите сценарий' : 'Пожалуйста, опишите идею бота')
-      : 'Сгенерировать';
+  const generateButtonTooltip = !mainInputText 
+    ? (mode === 'customize' ? 'Пожалуйста, загрузите сценарий' : 'Пожалуйста, опишите идею бота')
+    : 'Сгенерировать';
 
   const handlePinSuccess = () => {
     localStorage.setItem(AUTH_STATUS_KEY, 'true');
@@ -482,20 +463,9 @@ const App: React.FC = () => {
               
               {/* Action Button */}
               <div className="pt-4 border-t border-gray-700 space-y-4">
-                {!isApiKeySelected && !isLoading && (
-                  <div className="bg-yellow-900/50 border border-yellow-600 text-yellow-200 px-4 py-3 rounded-lg flex items-center justify-between gap-4">
-                    <span>Для генерации контента требуется API-ключ.</span>
-                    <button 
-                      onClick={() => setSettingsModalOpen(true)}
-                      className="font-bold hover:underline whitespace-nowrap"
-                    >
-                      Выбрать ключ
-                    </button>
-                  </div>
-                )}
                  <button
                   onClick={handleGenerate}
-                  disabled={isLoading || !mainInputText || !isApiKeySelected}
+                  disabled={isLoading || !mainInputText}
                   title={generateButtonTooltip}
                   className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-purple-500/50 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 disabled:shadow-none"
                 >
@@ -538,6 +508,7 @@ const App: React.FC = () => {
                     onRegenerateSingleMessage={handleRegenerateSingleMessage}
                     isRegeneratingAll={isRegeneratingAll}
                     regeneratingMessageIndex={regeneratingMessageIndex}
+                    apiKey={apiKey}
                 />
               </div>
             )}
@@ -552,9 +523,17 @@ const App: React.FC = () => {
 
       {isSettingsModalOpen && (
           <Modal title="Настройки" onClose={() => setSettingsModalOpen(false)}>
-              <div className="space-y-8">
-                  <ApiKeySelector onSelectKey={handleSelectKey} />
-                  <div className="pt-4 border-t border-gray-700">
+              <div className="space-y-6">
+                  <div className="text-center text-gray-400">
+                    <p>Здесь вы можете управлять настройками приложения.</p>
+                  </div>
+                  <div className="pt-4 border-t border-gray-700 space-y-4">
+                      <button
+                          onClick={() => { setApiKeyModalOpen(true); setSettingsModalOpen(false); }}
+                          className="w-full bg-purple-800/50 hover:bg-purple-700/60 text-purple-300 font-bold py-2 px-4 rounded-lg transition-colors"
+                      >
+                          Изменить API-ключ
+                      </button>
                       <button
                           onClick={handleLogout}
                           className="w-full bg-red-800/50 hover:bg-red-700/60 text-red-300 font-bold py-2 px-4 rounded-lg transition-colors"
@@ -576,6 +555,15 @@ const App: React.FC = () => {
           <Modal title="Политика конфиденциальности и Условия использования" onClose={() => setPolicyModalOpen(false)}>
               <LegalContent />
           </Modal>
+      )}
+
+      {isApiKeyModalOpen && (
+          <ApiKeyModal 
+              onSave={handleSaveApiKey}
+              isClosable={!!apiKey}
+              onClose={() => setApiKeyModalOpen(false)}
+              currentKey={apiKey}
+          />
       )}
     </div>
   );

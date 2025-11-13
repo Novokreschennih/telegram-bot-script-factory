@@ -16,6 +16,7 @@ interface GeneratedAssetsProps {
   onRegenerateSingleMessage: (index: number) => void;
   isRegeneratingAll: boolean;
   regeneratingMessageIndex: number | null;
+  apiKey: string;
 }
 
 const scriptToMarkdown = (script: ScriptNode[]): string => {
@@ -281,7 +282,8 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({
     onRegenerateAll,
     onRegenerateSingleMessage,
     isRegeneratingAll,
-    regeneratingMessageIndex
+    regeneratingMessageIndex,
+    apiKey
 }) => {
   const [scriptCopied, setScriptCopied] = useState(false);
   const [showRawCode, setShowRawCode] = useState(false);
@@ -539,6 +541,7 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({
               key={index} 
               title={prompt.blockTitle}
               prompt={prompt.imagePrompt}
+              apiKey={apiKey}
             />
           ))}
         </div>

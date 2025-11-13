@@ -10,9 +10,10 @@ import LoadingSpinner from './LoadingSpinner';
 interface ImageGenerationCardProps {
   title: string;
   prompt: string;
+  apiKey: string;
 }
 
-const ImageGenerationCard: React.FC<ImageGenerationCardProps> = ({ title, prompt }) => {
+const ImageGenerationCard: React.FC<ImageGenerationCardProps> = ({ title, prompt, apiKey }) => {
     const [copied, setCopied] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -28,7 +29,7 @@ const ImageGenerationCard: React.FC<ImageGenerationCardProps> = ({ title, prompt
         setIsLoading(true);
         setError(null);
         try {
-            const base64ImageBytes = await generateImageFromPrompt(prompt);
+            const base64ImageBytes = await generateImageFromPrompt(prompt, apiKey);
             setImageUrl(`data:image/png;base64,${base64ImageBytes}`);
         } catch (err) {
             console.error("Image generation failed:", err);
