@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Modality } from "@google/genai";
-import type { GeneratedAssets, TextGenerationResponse } from '../types';
+import type { GeneratedAssets, TextGenerationResponse, CustomizedScriptItem } from '../types';
 
 const getAiClient = (apiKey: string) => {
     if (!apiKey) {
@@ -107,7 +107,10 @@ const generateTextContent = async (
                 "buttons": [[{"text": "Кнопка 1", "callback_data": "action1"}]]
              },
              {
-                "text": "Текст второго сообщения."
+                "imagePlaceholderFor": "Название блока из scriptBlocks, который иллюстрирует следующий шаг"
+             },
+             {
+                "text": "Текст второго сообщения, которое следует ПОСЛЕ изображения."
              }
           ],
           "scriptBlocks": [
@@ -124,9 +127,10 @@ const generateTextContent = async (
         -   **profilePicturePrompt:** Создай промпт для ИИ, генерирующего изображения. Промпт должен быть на английском языке, детализированным, и описывать абстрактную иконку или маскота для аватара Telegram-бота. Пример: "A friendly, minimalist robot mascot waving, vector art, vibrant colors, clean lines, circular background, suitable for a small profile picture".
         -   **description:** Сделай его привлекательным и соответствующим цели и тону бота.
         -   **capabilities:** Будь прямым и ясным. Начинай каждый пункт с глагола действия.
-        -   **customizedScript:** Это самая важная часть. Перепиши весь сценарий (или создай с нуля), а не просто добавляй комментарии. Тон, лексика, структура предложений, использование эмодзи и длина ответов должны идеально отражать ВСЕ выбранные настройки. Если выбрана **маркетинговая модель продаж**, убедись, что структура диалога следует ее принципам.
-            -   **Форматирование:** Используй Markdown, совместимый с Telegram (*жирный текст* , _курсив_ , __подчеркнутый__), внутри значения ключа \`text\` для улучшения читаемости.
-            -   **Структура вывода:** Верни сценарий СТРОГО в формате JSON-массива объектов. Каждый элемент массива — это объект, представляющий одно сообщение от бота. Объект должен иметь ключ \`text\` со строковым значением. Если у сообщения есть кнопки, добавь ключ \`buttons\` с массивом массивов объектов кнопок (формат Telegram Bot API: \`[[{"text": "Button 1", "callback_data": "data1"}]]\`).
+        -   **customizedScript:** Это самая важная часть. Перепиши весь сценарий (или создай с нуля). Тон, лексика, структура предложений, использование эмодзи и длина ответов должны идеально отражать ВСЕ выбранные настройки. 
+            -   **ВАЖНО - ПЛЕЙСХОЛДЕРЫ ИЗОБРАЖЕНИЙ:** Когда по логике диалога уместно отправить пользователю изображение для иллюстрации, **вставь в массив \`customizedScript\` специальный объект-плейсхолдер** перед следующим текстовым сообщением. Этот объект должен иметь ТОЛЬКО один ключ: \`"imagePlaceholderFor"\`, значением которого является точное название (\`title\`) соответствующего блока из твоего же сгенерированного списка \`scriptBlocks\`. Это покажет, где в потоке диалога должно появиться изображение.
+            -   **Форматирование текста:** Используй Markdown, совместимый с Telegram (*жирный текст* , _курсив_ , __подчеркнутый__), внутри значения ключа \`text\` для улучшения читаемости.
+            -   **Структура вывода:** Верни сценарий СТРОГО в формате JSON-массива объектов. Каждый элемент массива — это либо объект сообщения (с ключом \`text\`), либо объект плейсхолдера изображения (с ключом \`imagePlaceholderFor\`).
         -   **scriptBlocks:** Определи 3-5 основных логических разделов в адаптированном сценарии. **Логический раздел — это группа сообщений, которая заканчивается предложением пользователю совершить действие (например, нажать на кнопки).** 'description' для каждого блока должен быть визуальным промптом на английском языке. Например: "A friendly robot waving hello to a new user, with message bubbles in the background, digital illustration style."
     `;
     
@@ -160,9 +164,9 @@ const generateTextContent = async (
                           required: ['text', 'callback_data']
                         }
                       }
-                    }
+                    },
+                    imagePlaceholderFor: { type: Type.STRING },
                   },
-                  required: ['text']
                 }
               },
               scriptBlocks: {
@@ -190,6 +194,9 @@ const generateTextContent = async (
 
             const jsonText = response.text.trim();
             try {
+                if (typeof response.text === 'object') {
+                    return response.text as TextGenerationResponse;
+                }
                 return JSON.parse(jsonText) as TextGenerationResponse;
             } catch (e) {
                 console.error("Failed to parse model response:", jsonText);
@@ -209,11 +216,10 @@ const generateTextContent = async (
                 await sleep(delay);
             } else {
                 console.error(`Generation failed on attempt ${attempt}.`, err);
-                throw err; // Re-throw the last error to be handled by the UI
+                throw err;
             }
         }
     }
-    // Fallback error, should not be reached if MAX_RETRIES > 0.
     throw new Error('Generation failed after multiple retries.');
 };
 
@@ -229,7 +235,7 @@ export const regenerateSingleMessage = async (
         languageComplexity: string;
         salesFramework: string;
     },
-    currentGeneratedScript: string, // The full script generated so far, for context
+    currentGeneratedScript: string,
     messageToRegenerate: string,
     apiKey: string,
     modelName: string,
@@ -290,7 +296,7 @@ export const generateImageFromPrompt = async (prompt: string, apiKey: string): P
         model,
         contents: { parts: [{ text: prompt }] },
         config: {
-            responseModalities: [Modality.IMAGE] as Modality[],
+            responseModalities: [Modality.IMAGE],
         },
     };
 
@@ -320,7 +326,7 @@ export const generateImageFromPrompt = async (prompt: string, apiKey: string): P
                                 errorMessage.includes('unavailable');
 
             if (isRetryable && attempt < MAX_RETRIES) {
-                let delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s
+                let delay = Math.pow(2, attempt) * 1000;
 
                 if (err.message) {
                     try {
@@ -333,7 +339,7 @@ export const generateImageFromPrompt = async (prompt: string, apiKey: string): P
                             }
                         }
                     } catch (e) {
-                        // Not a JSON message, stick to exponential backoff
+                        // ignore
                     }
                 }
                 

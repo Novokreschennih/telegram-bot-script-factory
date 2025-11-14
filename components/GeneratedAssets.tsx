@@ -1,12 +1,13 @@
 
 import React, { useMemo, useState } from 'react';
-import type { GeneratedAssets, ScriptNode } from '../types';
+import type { GeneratedAssets, CustomizedScriptItem, ScriptNode } from '../types';
 import { OUTPUT_FORMATS } from '../constants';
 import { CopyIcon } from './icons/CopyIcon';
 import { CheckIcon } from './icons/CheckIcon';
 import { DownloadIcon } from './icons/DownloadIcon';
 import { RefreshIcon } from './icons/RefreshIcon';
 import { WandIcon } from './icons/WandIcon';
+import { ImageIcon } from './icons/ImageIcon';
 import LoadingSpinner from './LoadingSpinner';
 import ImageGenerationCard from './ImageGenerationCard';
 
@@ -19,33 +20,44 @@ interface GeneratedAssetsProps {
   apiKey: string;
 }
 
-const scriptToMarkdown = (script: ScriptNode[]): string => {
-    return script.map(node => {
-        let text = node.text;
-        if (node.buttons && node.buttons.length > 0) {
-            const buttonText = node.buttons.flat().map(btn => `[ ${btn.text} ]`).join(' ');
-            text += `\n\n${buttonText}`;
+const isScriptNode = (item: CustomizedScriptItem): item is ScriptNode => {
+    return (item as ScriptNode).text !== undefined;
+};
+
+const scriptToMarkdown = (script: CustomizedScriptItem[]): string => {
+    return script.map(item => {
+        if (isScriptNode(item)) {
+            let text = item.text;
+            if (item.buttons && item.buttons.length > 0) {
+                const buttonText = item.buttons.flat().map(btn => `[ ${btn.text} ]`).join(' ');
+                text += `\n\n${buttonText}`;
+            }
+            return text;
+        } else {
+            return `\n[ИЗОБРАЖЕНИЕ: ${item.imagePlaceholderFor}]\n`;
         }
-        return text;
     }).join('\n\n---\n\n');
 };
 
-const scriptToText = (script: ScriptNode[]): string => {
-    return script.map(node => {
-        let text = node.text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1'); // Экранирование Markdown символов
-        if (node.buttons && node.buttons.length > 0) {
-            const buttonText = node.buttons.flat().map(btn => `[ ${btn.text} ]`).join(' ');
-            text += `\n\n${buttonText}`;
+const scriptToText = (script: CustomizedScriptItem[]): string => {
+    return script.map(item => {
+        if (isScriptNode(item)) {
+            let text = item.text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
+            if (item.buttons && item.buttons.length > 0) {
+                const buttonText = item.buttons.flat().map(btn => `[ ${btn.text} ]`).join(' ');
+                text += `\n\n${buttonText}`;
+            }
+            return text;
+        } else {
+            return `\n[ИЗОБРАЖЕНИЕ: ${item.imagePlaceholderFor}]\n`;
         }
-        return text;
     }).join('\n\n---\n\n');
 };
 
-const scriptToJson = (script: ScriptNode[]): string => {
+const scriptToJson = (script: CustomizedScriptItem[]): string => {
     return JSON.stringify(script, null, 2);
 };
 
-// Helper to generate a simple UUID v4
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
@@ -53,25 +65,27 @@ const generateUUID = () => {
   });
 };
 
-const scriptToN8nJson = (script: ScriptNode[]): string => {
+const scriptToN8nJson = (script: CustomizedScriptItem[], scriptBlockPrompts: GeneratedAssets['scriptBlockPrompts']): string => {
     const nodes: any[] = [];
     const connections: any = {};
     const initialX = -1000;
     const initialY = 400;
+    let lastNodeName: string | null = null;
+    let lastNodePosition = { x: initialX, y: initialY };
 
-    // 1. Telegram Trigger Node
     const triggerNode = {
         parameters: { updates: ["message", "callback_query"], additionalFields: {} },
         id: generateUUID(),
         name: "Telegram Trigger",
         type: "n8n-nodes-base.telegramTrigger",
         typeVersion: 1.1,
-        position: [initialX, initialY],
+        position: [lastNodePosition.x, lastNodePosition.y],
         credentials: { telegramApi: { id: "YOUR_CREDENTIALS_ID", name: "YOUR_TELEGRAM_CREDENTIALS" } }
     };
     nodes.push(triggerNode);
+    lastNodeName = triggerNode.name;
+    lastNodePosition.x += 220;
 
-    // 2. Set User Data Node
     const setUserDataNode = {
         parameters: {
             assignments: {
@@ -87,156 +101,155 @@ const scriptToN8nJson = (script: ScriptNode[]): string => {
         name: "Set User Data",
         type: "n8n-nodes-base.set",
         typeVersion: 3.4,
-        position: [initialX + 220, initialY]
+        position: [lastNodePosition.x, lastNodePosition.y]
     };
     nodes.push(setUserDataNode);
-    connections[triggerNode.name] = { main: [[{ node: setUserDataNode.name, type: "main", index: 0 }]] };
+    connections[lastNodeName] = { main: [[{ node: setUserDataNode.name, type: "main", index: 0 }]] };
+    lastNodeName = setUserDataNode.name;
+    lastNodePosition.x += 220;
     
-    // 3. Main Router (Switch) Node
     const routerNode = {
         parameters: { rules: { values: [] }, options: {} },
         id: generateUUID(),
         name: "Main Router",
         type: "n8n-nodes-base.switch",
         typeVersion: 3.2,
-        position: [initialX + 440, initialY]
+        position: [lastNodePosition.x, lastNodePosition.y]
     };
-    connections[setUserDataNode.name] = { main: [[{ node: routerNode.name, type: "main", index: 0 }]] };
-
-    // 4. Create all message and wait nodes
-    const messageNodes: any[] = [];
-    script.forEach((node, index) => {
-        const messageNode = {
-            parameters: {
-                chatId: "={{ $('Set User Data').item.json.chat_id }}",
-                text: node.text,
-                additionalFields: {}
-            },
-            id: generateUUID(),
-            name: `БЛОК ${index + 1}: Сообщение`,
-            type: "n8n-nodes-base.telegram",
-            typeVersion: 1.2,
-            position: [0, 0], // Placeholder position
-            credentials: { telegramApi: { id: "YOUR_CREDENTIALS_ID", name: "YOUR_TELEGRAM_CREDENTIALS" } }
-        };
-        if (node.buttons && node.buttons.length > 0) {
-            // FIX: Cast parameters to `any` to allow adding `replyMarkup`, as it doesn't exist on the inferred type.
-            (messageNode.parameters as any).replyMarkup = "inlineKeyboard";
-            (messageNode.parameters as any).inlineKeyboard = {
-                rows: node.buttons.map(buttonRow => ({
-                    row: {
-                        buttons: buttonRow.map(button => ({
-                            text: button.text,
-                            additionalFields: { callback_data: button.callback_data }
-                        }))
+    connections[lastNodeName] = { main: [[{ node: routerNode.name, type: "main", index: 0 }]] };
+    
+    const scriptItemNodes: any[] = [];
+    script.forEach((item, index) => {
+        let node: any;
+        if(isScriptNode(item)) {
+            node = {
+                parameters: {
+                    chatId: "={{ $('Set User Data').item.json.chat_id }}",
+                    text: item.text,
+                    additionalFields: {}
+                },
+                id: generateUUID(),
+                name: `Сообщение ${index + 1}`,
+                type: "n8n-nodes-base.telegram",
+                typeVersion: 1.2,
+                position: [0, 0],
+                credentials: { telegramApi: { id: "YOUR_CREDENTIALS_ID", name: "YOUR_TELEGRAM_CREDENTIALS" } }
+            };
+            if (item.buttons && item.buttons.length > 0) {
+                (node.parameters as any).replyMarkup = "inlineKeyboard";
+                (node.parameters as any).inlineKeyboard = {
+                    rows: item.buttons.map(buttonRow => ({
+                        row: {
+                            buttons: buttonRow.map(button => ({
+                                text: button.text,
+                                additionalFields: { callback_data: button.callback_data }
+                            }))
+                        }
+                    }))
+                };
+            }
+        } else {
+            const promptData = scriptBlockPrompts.find(p => p.blockTitle === item.imagePlaceholderFor);
+            node = {
+                parameters: {
+                    operation: 'sendPhoto',
+                    chatId: "={{ $('Set User Data').item.json.chat_id }}",
+                    fileIdOrUrl: "URL_СГЕНЕРИРОВАННОГО_ИЗОБРАЖЕНИЯ",
+                    additionalFields: {
+                        caption: `AI Prompt: ${promptData?.imagePrompt || 'No prompt found'}`
                     }
-                }))
+                },
+                id: generateUUID(),
+                name: `Изображение: ${item.imagePlaceholderFor}`,
+                type: "n8n-nodes-base.telegram",
+                typeVersion: 1.2,
+                position: [0, 0],
+                credentials: { telegramApi: { id: "YOUR_CREDENTIALS_ID", name: "YOUR_TELEGRAM_CREDENTIALS" } }
             };
         }
-        messageNodes.push(messageNode);
+        scriptItemNodes.push(node);
     });
 
-    // 5. Build connections and create router rules
     const routerConnections: any[][] = [];
-    
-    // Rule for /start
-    if (messageNodes.length > 0) {
+    if (scriptItemNodes.length > 0) {
         routerNode.parameters.rules.values.push({
             conditions: {
                 options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 2 },
                 conditions: [{
-                    id: generateUUID(),
-                    leftValue: "={{ $json.input_data }}",
-                    rightValue: "/start",
-                    operator: { type: "string", operation: "equals" }
+                    id: generateUUID(), leftValue: "={{ $json.input_data }}", rightValue: "/start", operator: { type: "string", operation: "equals" }
                 }],
                 combinator: "and"
             }
         });
-        routerConnections.push([{ node: messageNodes[0].name, type: "main", index: 0 }]);
+        routerConnections.push([{ node: scriptItemNodes[0].name, type: "main", index: 0 }]);
     }
 
-    const branches: any[][] = [];
+    let branchStartY = lastNodePosition.y - 400;
+    const allCallbacks = new Set<string>();
+    
     let currentBranch: any[] = [];
+    const branches: any[][] = [];
 
-    messageNodes.forEach((msgNode, index) => {
-        currentBranch.push(msgNode);
-        if ((msgNode.parameters as any).replyMarkup === 'inlineKeyboard' || index === messageNodes.length - 1) {
+    scriptItemNodes.forEach((node) => {
+        currentBranch.push(node);
+        if ((node.parameters as any).replyMarkup === 'inlineKeyboard' || node === scriptItemNodes[scriptItemNodes.length - 1]) {
             branches.push(currentBranch);
             currentBranch = [];
         }
     });
 
-    let branchStartY = initialY - 600;
     branches.forEach((branch, branchIndex) => {
-        let branchX = initialX + 660;
+        let branchX = lastNodePosition.x + 220;
         
-        // Connect router to the start of the branch
         if (branchIndex > 0) {
             const previousBranch = branches[branchIndex - 1];
             const triggerNode = previousBranch[previousBranch.length - 1];
             
-            const callbacks = (triggerNode.parameters as any).inlineKeyboard.rows
+            const callbacks = ((triggerNode.parameters as any).inlineKeyboard?.rows || [])
                 .flatMap((r: any) => r.row.buttons)
                 .map((b: any) => b.additionalFields.callback_data);
-            
+
             if (callbacks.length > 0) {
-                const conditions = callbacks.map((cb: string) => ({
-                    id: generateUUID(),
-                    leftValue: "={{ $json.input_data }}",
-                    rightValue: cb,
-                    operator: { type: "string", operation: "equals" }
-                }));
-                routerNode.parameters.rules.values.push({
-                    conditions: {
-                        options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 2 },
-                        conditions: conditions,
-                        combinator: "or"
-                    }
-                });
-                routerConnections.push([{ node: branch[0].name, type: "main", index: 0 }]);
+                const uniqueCallbacks = callbacks.filter((cb: string) => !allCallbacks.has(cb));
+                uniqueCallbacks.forEach((cb: string) => allCallbacks.add(cb));
+
+                if (uniqueCallbacks.length > 0) {
+                    routerNode.parameters.rules.values.push({
+                        conditions: {
+                            options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 2 },
+                            conditions: uniqueCallbacks.map((cb: string) => ({
+                                id: generateUUID(), leftValue: "={{ $json.input_data }}", rightValue: cb, operator: { type: "string", operation: "equals" }
+                            })),
+                            combinator: "or"
+                        }
+                    });
+                    routerConnections.push([{ node: branch[0].name, type: "main", index: 0 }]);
+                }
             }
         }
         
-        branch.forEach((node, nodeIndex) => {
+        let lastBranchNodeName: string | null = null;
+        branch.forEach((node) => {
             node.position = [branchX, branchStartY];
             nodes.push(node);
-
-            if (nodeIndex < branch.length - 1) {
-                branchX += 220;
-                const waitNode = {
-                    parameters: { amount: 15 },
-                    id: generateUUID(),
-                    name: `Wait ${nodes.length}`,
-                    type: "n8n-nodes-base.wait",
-                    typeVersion: 1.1,
-                    position: [branchX, branchStartY],
-                };
-                nodes.push(waitNode);
-                connections[node.name] = { main: [[{ node: waitNode.name, type: "main", index: 0 }]] };
-                connections[waitNode.name] = { main: [[{ node: branch[nodeIndex + 1].name, type: "main", index: 0 }]] };
-                branchX += 220;
+            
+            if (lastBranchNodeName) {
+                connections[lastBranchNodeName] = { main: [[{ node: node.name, type: "main", index: 0 }]] };
             }
+            lastBranchNodeName = node.name;
+            branchX += 220;
         });
+
         branchStartY += 250;
     });
     
     nodes.push(routerNode);
     connections[routerNode.name] = { main: routerConnections };
 
-    const n8nWorkflow = {
-        nodes,
-        connections,
-        meta: { instanceId: generateUUID().substring(0, 64) },
-        pinData: {}
-    };
-    
-    return JSON.stringify(n8nWorkflow, null, 2);
+    return JSON.stringify({ nodes, connections, meta: { instanceId: generateUUID().substring(0, 64) }, pinData: {} }, null, 2);
 };
 
-// Helper to parse simple Telegram-like Markdown for preview
 const parseTelegramMarkdown = (text: string): React.ReactNode[] => {
-  // Regex to split by *, _, and __, keeping the delimiters
   const parts = text.split(/(\*.*?\*|__.*?__|_.*?_)/g);
   return parts.filter(part => part).map((part, index) => {
     if (part.startsWith('*') && part.endsWith('*') && part.length > 1) {
@@ -297,7 +310,7 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({
         case 'Markdown':
             return scriptToMarkdown(assets.customizedScript);
         case 'n8n JSON':
-            return scriptToN8nJson(assets.customizedScript);
+            return scriptToN8nJson(assets.customizedScript, assets.scriptBlockPrompts);
         case 'JSON':
             return scriptToJson(assets.customizedScript);
         case 'Text':
@@ -305,7 +318,7 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({
         default:
             return scriptToMarkdown(assets.customizedScript);
     }
-  }, [assets.customizedScript, selectedFormat]);
+  }, [assets.customizedScript, assets.scriptBlockPrompts, selectedFormat]);
 
 
   const copyToClipboard = () => {
@@ -356,7 +369,6 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({
 
   return (
     <div className="space-y-12 animate-fadeIn">
-      {/* Bot Profile Section */}
       <section className="bg-gray-800/50 rounded-2xl p-6 md:p-8">
         <h2 className="text-3xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500">
           Профиль бота
@@ -385,7 +397,6 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({
         </div>
       </section>
 
-      {/* Customized Script Section */}
       <section className="bg-gray-800/50 rounded-2xl p-6 md:p-8">
         <div className="flex flex-col md:flex-row justify-between items-center text-center gap-4 mb-6">
             <div className="flex-grow">
@@ -404,71 +415,80 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({
             </button>
         </div>
         
-        {/* Chat Preview */}
         <div className="bg-gray-900/70 rounded-lg p-4 space-y-4 max-h-[600px] overflow-y-auto mb-6">
-          {assets.customizedScript.map((node, index) => {
+          {assets.customizedScript.map((item, index) => {
             const isRegeneratingThisMessage = regeneratingMessageIndex === index;
             const isAnyMessageRegenerating = regeneratingMessageIndex !== null;
-
-            return (
-              <div key={index} className="flex flex-col items-start group relative">
-                  <div className={`w-full text-left bg-purple-900/40 rounded-lg rounded-tl-none p-3 max-w-xl transition-all duration-300 ${isAnyMessageRegenerating && !isRegeneratingThisMessage ? 'opacity-50 blur-sm' : ''}`}>
-                      {isRegeneratingThisMessage ? (
-                          <div className="flex items-center justify-center h-10">
-                              <LoadingSpinner />
-                          </div>
-                      ) : (
-                          <>
-                              <p className="text-gray-200 whitespace-pre-wrap">{parseTelegramMarkdown(node.text)}</p>
-                              <div className="absolute top-1 right-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                  <button 
-                                      onClick={() => onRegenerateSingleMessage(index)}
-                                      disabled={isAnyMessageRegenerating || isRegeneratingAll}
-                                      className="p-1.5 bg-gray-700/80 text-purple-300 rounded-full hover:bg-purple-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                                      title="Перегенерировать это сообщение"
-                                  >
-                                      <WandIcon />
-                                  </button>
-                                  <button
-                                      onClick={() => handleCopyMessage(node.text, index)}
-                                      className="p-1.5 bg-gray-700/80 text-gray-300 rounded-full hover:bg-gray-600"
-                                      title="Копировать сообщение"
-                                  >
-                                      {copiedMessageIndex === index ? <CheckIcon /> : <CopyIcon />}
-                                  </button>
-                              </div>
-                          </>
-                      )}
-                  </div>
-                {node.buttons && node.buttons.length > 0 && (
-                  <div className={`mt-2 flex flex-wrap gap-2 transition-opacity duration-300 ${isAnyMessageRegenerating || isRegeneratingAll ? 'opacity-50' : ''}`}>
-                    {node.buttons.flat().map((button, btnIndex) => {
-                      const buttonKey = `${index}-${btnIndex}`;
-                      const isCopied = copiedButtonKey === buttonKey;
-                      return (
-                          <button
-                              key={btnIndex}
-                              onClick={() => handleCopyButton(button.text, index, btnIndex)}
-                              disabled={isAnyMessageRegenerating || isRegeneratingAll}
-                              className={`rounded-full px-4 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-purple-500 disabled:cursor-not-allowed ${
-                                  isCopied
-                                  ? 'bg-green-600 text-white cursor-default'
-                                  : 'bg-gray-700/80 text-gray-300 hover:bg-gray-600 cursor-pointer'
-                              }`}
-                              title={`Нажмите, чтобы скопировать: "${button.text}"`}
-                          >
-                              {isCopied ? 'Скопировано!' : button.text}
-                          </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
+            
+            if (isScriptNode(item)) {
+              return (
+                <div key={index} className="flex flex-col items-start group relative">
+                    <div className={`w-full text-left bg-purple-900/40 rounded-lg rounded-tl-none p-3 max-w-xl transition-all duration-300 ${isAnyMessageRegenerating && !isRegeneratingThisMessage ? 'opacity-50 blur-sm' : ''}`}>
+                        {isRegeneratingThisMessage ? (
+                            <div className="flex items-center justify-center h-10">
+                                <LoadingSpinner />
+                            </div>
+                        ) : (
+                            <>
+                                <p className="text-gray-200 whitespace-pre-wrap">{parseTelegramMarkdown(item.text)}</p>
+                                <div className="absolute top-1 right-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                    <button 
+                                        onClick={() => onRegenerateSingleMessage(index)}
+                                        disabled={isAnyMessageRegenerating || isRegeneratingAll}
+                                        className="p-1.5 bg-gray-700/80 text-purple-300 rounded-full hover:bg-purple-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title="Перегенерировать это сообщение"
+                                    >
+                                        <WandIcon />
+                                    </button>
+                                    <button
+                                        onClick={() => handleCopyMessage(item.text, index)}
+                                        className="p-1.5 bg-gray-700/80 text-gray-300 rounded-full hover:bg-gray-600"
+                                        title="Копировать сообщение"
+                                    >
+                                        {copiedMessageIndex === index ? <CheckIcon /> : <CopyIcon />}
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                  {item.buttons && item.buttons.length > 0 && (
+                    <div className={`mt-2 flex flex-wrap gap-2 transition-opacity duration-300 ${isAnyMessageRegenerating || isRegeneratingAll ? 'opacity-50' : ''}`}>
+                      {item.buttons.flat().map((button, btnIndex) => {
+                        const buttonKey = `${index}-${btnIndex}`;
+                        const isCopied = copiedButtonKey === buttonKey;
+                        return (
+                            <button
+                                key={btnIndex}
+                                onClick={() => handleCopyButton(button.text, index, btnIndex)}
+                                disabled={isAnyMessageRegenerating || isRegeneratingAll}
+                                className={`rounded-full px-4 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-purple-500 disabled:cursor-not-allowed ${
+                                    isCopied
+                                    ? 'bg-green-600 text-white cursor-default'
+                                    : 'bg-gray-700/80 text-gray-300 hover:bg-gray-600 cursor-pointer'
+                                }`}
+                                title={`Нажмите, чтобы скопировать: "${button.text}"`}
+                            >
+                                {isCopied ? 'Скопировано!' : button.text}
+                            </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            } else {
+                return (
+                    <div key={index} className="flex justify-center my-2">
+                        <div className={`flex items-center gap-2 text-sm text-gray-500 bg-gray-800/60 border border-dashed border-gray-600 rounded-lg px-4 py-2 transition-opacity duration-300 ${isAnyMessageRegenerating ? 'opacity-50' : ''}`}>
+                            <ImageIcon />
+                            <span>Изображение: <strong>{item.imagePlaceholderFor}</strong></span>
+                        </div>
+                    </div>
+                );
+            }
           })}
         </div>
 
-        {/* Export and Code View Controls */}
         <div className="bg-gray-900/50 rounded-lg p-4">
             <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
                 <div>
@@ -527,7 +547,6 @@ const GeneratedAssetsComponent: React.FC<GeneratedAssetsProps> = ({
 
       </section>
 
-      {/* Script Visuals Section */}
       <section className="bg-gray-800/50 rounded-2xl p-6 md:p-8">
         <h2 className="text-3xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
           Визуализация сценария

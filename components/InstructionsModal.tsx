@@ -30,12 +30,11 @@ const InstructionsModal: React.FC = () => {
                     В зависимости от режима, загрузите файл со сценарием или подробно опишите вашу идею. Вы также можете добавить "вашу историю" — уникальный контекст о вашей компании или продукте, который ИИ органично вплетет в сценарий.
                 </InstructionStep>
                 
-                {/* FIX: Replaced double quotes inside the title attribute with typographic quotes («») to prevent a JSX parsing error. */}
                 <InstructionStep number={3} title="Настройте «голос» бота">
                     Используйте выпадающие списки, чтобы точно определить характер вашего бота. Выберите стиль общения, целевую аудиторию, формальность и даже частоту использования эмодзи. Каждый параметр влияет на конечный результат.
                 </InstructionStep>
 
-                <InstructionStep number={4} title="Сгенерируйте и получите результат">
+                <InstructionStep number={4} title="Сгенерировать и получите результат">
                     Нажмите кнопку "Сгенерировать". Через несколько мгновений вы получите полный пакет:
                     <ul className="list-disc list-inside mt-2 text-gray-400 space-y-1">
                         <li><strong>Профиль бота:</strong> Готовое описание и промпт для генерации аватара.</li>
@@ -45,7 +44,6 @@ const InstructionsModal: React.FC = () => {
                 </InstructionStep>
             </div>
 
-            {/* FIX: A confusing comment was here, likely causing a JSX parsing error which resulted in the "Cannot find name 'div'" error. It has been removed. */}
             <div className="pt-4 border-t border-gray-700 text-center text-sm text-gray-500">
                 <p>Экспериментируйте с настройками, чтобы добиться идеального результата!</p>
             </div>

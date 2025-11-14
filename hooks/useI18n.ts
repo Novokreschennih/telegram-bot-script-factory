@@ -1,6 +1,3 @@
-
-import React from 'react';
-
 // Dummy implementation for i18n hook
 export const useI18n = () => {
   const t = (key: string) => {
